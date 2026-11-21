@@ -1,0 +1,46 @@
+---
+# duchess:name: Nginx Reverse Proxy
+# duchess:description: Generated nginx-proxy playbook via Duchess
+# duchess:category: nginx-proxy
+- name: Nginx Reverse Proxy
+  hosts: webservers
+  become: true
+  vars:
+    site_domain: app.example.com
+    upstream_addr: 127.0.0.1:8080
+  tasks:
+    - name: Ensure Nginx is installed
+      ansible.builtin.package:
+        name: nginx
+        state: present
+
+    - name: Configure reverse proxy for {{ site_domain }}
+      ansible.builtin.copy:
+        dest: "/etc/nginx/sites-available/{{ site_domain }}.conf"
+        mode: "0644"
+        content: |
+          server {
+              listen 80;
+              server_name {{ site_domain }};
+              location / {
+                  proxy_pass http://{{ upstream_addr }};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              }
+          }
+
+    - name: Enable site configuration
+      ansible.builtin.file:
+        src: "/etc/nginx/sites-available/{{ site_domain }}.conf"
+        dest: "/etc/nginx/sites-enabled/{{ site_domain }}.conf"
+        state: link
+
+    - name: Test Nginx configuration
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Reload Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded

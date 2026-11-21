@@ -1,0 +1,27 @@
+---
+# duchess:name: Docker Safe Cleanup
+# duchess:description: Removes stopped containers and dangling images without touching running workloads or volumes.
+# duchess:category: containers
+- name: Docker Safe Cleanup
+  hosts: docker_hosts
+  become: true
+  tasks:
+    - name: Show Docker disk usage before cleanup
+      ansible.builtin.command: docker system df
+      register: before_df
+      changed_when: false
+
+    - name: Prune stopped containers and dangling images
+      ansible.builtin.command: docker system prune -f
+      register: prune_out
+
+    - name: Show Docker disk usage after cleanup
+      ansible.builtin.command: docker system df
+      register: after_df
+      changed_when: false
+
+    - name: Print cleanup summary
+      ansible.builtin.debug:
+        msg:
+          - "Prune output: {{ prune_out.stdout }}"
+          - "After:\n{{ after_df.stdout }}"

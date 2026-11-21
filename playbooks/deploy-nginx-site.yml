@@ -1,0 +1,44 @@
+---
+# duchess:name: Deploy Nginx Reverse Proxy Site
+# duchess:description: Writes an Nginx virtual host reverse proxy configuration, validates syntax, and reloads Nginx.
+# duchess:category: web
+# duchess:vars: site_domain=app.example.com,upstream_port=8080
+- name: Deploy Nginx Reverse Proxy Site
+  hosts: webservers
+  become: true
+  vars:
+    site_domain: app.example.com
+    upstream_port: 8080
+  tasks:
+    - name: Write Nginx site configuration
+      ansible.builtin.copy:
+        dest: "/etc/nginx/sites-available/{{ site_domain }}.conf"
+        mode: "0644"
+        content: |
+          server {
+              listen 80;
+              server_name {{ site_domain }};
+
+              location / {
+                  proxy_pass http://127.0.0.1:{{ upstream_port }};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+
+    - name: Enable site symlink
+      ansible.builtin.file:
+        src: "/etc/nginx/sites-available/{{ site_domain }}.conf"
+        dest: "/etc/nginx/sites-enabled/{{ site_domain }}.conf"
+        state: link
+
+    - name: Validate Nginx configuration
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Reload Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded

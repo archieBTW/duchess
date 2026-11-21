@@ -1,0 +1,36 @@
+---
+# duchess:name: System Health Check
+# duchess:description: Checks disk usage, memory pressure, system load, uptime, and failed systemd units.
+# duchess:category: diagnostics
+- name: System Health Check
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Check system uptime and load average
+      ansible.builtin.command: uptime
+      register: uptime_out
+      changed_when: false
+
+    - name: Check disk usage across mounted partitions
+      ansible.builtin.command: df -hT -x tmpfs -x devtmpfs
+      register: disk_out
+      changed_when: false
+
+    - name: Check memory utilization
+      ansible.builtin.command: free -h
+      register: mem_out
+      changed_when: false
+
+    - name: List failed systemd units
+      ansible.builtin.shell: systemctl --failed --no-pager || true
+      register: failed_units
+      changed_when: false
+
+    - name: Print health summary
+      ansible.builtin.debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Uptime: {{ uptime_out.stdout }}"
+          - "Memory:\n{{ mem_out.stdout }}"
+          - "Disk:\n{{ disk_out.stdout }}"
+          - "Failed units:\n{{ failed_units.stdout }}"
