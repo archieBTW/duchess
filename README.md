@@ -4,6 +4,24 @@ Duchess is a Go-based DevOps TUI dashboard and CLI for managing servers over SSH
 
 ---
 
+## Screenshots
+
+### Fleet Overview & Proactive Health Alerts
+![Duchess Fleet Overview](docs/screenshots/overview.png)
+
+### Server Inspector — Live Telemetry & Actionable Containers
+![Duchess Server Inspector](docs/screenshots/inspector.png)
+
+### Auto-Detected Websites, Reverse Proxies & TLS Expiry
+![Duchess Websites and Apps](docs/screenshots/webapps.png)
+
+### Playbooks & Scripts with Python Virtualenv (`--venv`) Execution
+![Duchess Playbooks and Scripts](docs/screenshots/automation.png)
+
+![Duchess Run Playbook Modal with Venv](docs/screenshots/playbook-venv-modal.png)
+
+---
+
 ## Project Layout
 
 ```text
