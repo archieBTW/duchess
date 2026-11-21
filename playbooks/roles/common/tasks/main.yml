@@ -1,0 +1,112 @@
+---
+# ==============================================================================
+# Role: common
+# Base setup, swap configuration, system hardening, and core dependencies
+# ==============================================================================
+
+- name: Update apt cache and upgrade system packages
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+    upgrade: dist
+  become: yes
+
+- name: Install core system dependencies
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - git
+      - rsync
+      - ufw
+      - fail2ban
+      - unattended-upgrades
+      - htop
+      - python3-pip
+      - python3-setuptools
+      - python3-venv
+      - net-tools
+    state: present
+  become: yes
+
+# ==============================================================================
+# Swapfile Setup (Essential for e2-micro with 1GB RAM)
+# Prevents OOM kills during Docker builds or memory bursts
+# ==============================================================================
+- name: Check if swapfile exists
+  stat:
+    path: /swapfile
+  register: swap_file_stat
+  become: yes
+
+- name: Create swapfile if not present
+  command: fallocate -l {{ swap_file_size_mb }}M /swapfile
+  when: not swap_file_stat.stat.exists
+  become: yes
+
+- name: Set correct permissions on swapfile
+  file:
+    path: /swapfile
+    owner: root
+    group: root
+    mode: '0600'
+  when: not swap_file_stat.stat.exists
+  become: yes
+
+- name: Format swapfile
+  command: mkswap /swapfile
+  when: not swap_file_stat.stat.exists
+  become: yes
+
+- name: Enable swapfile
+  command: swapon /swapfile
+  when: not swap_file_stat.stat.exists
+  become: yes
+
+- name: Persist swap in /etc/fstab
+  mount:
+    name: none
+    src: /swapfile
+    fstype: swap
+    opts: sw
+    state: present
+  become: yes
+
+- name: Configure vm.swappiness and vfs_cache_pressure
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+  loop:
+    - { name: 'vm.swappiness', value: '20' }
+    - { name: 'vm.vfs_cache_pressure', value: '50' }
+  become: yes
+
+# ==============================================================================
+# Kernel Network Security Hardening
+# ==============================================================================
+- name: Apply sysctl security hardening
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+  loop:
+    # SYN flood protection
+    - { key: 'net.ipv4.tcp_syncookies', value: '1' }
+    # Disable IP source routing
+    - { key: 'net.ipv4.conf.all.accept_source_route', value: '0' }
+    - { key: 'net.ipv4.conf.default.accept_source_route', value: '0' }
+    # Ignore ICMP broadcast requests
+    - { key: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
+    # Disable ICMP redirect acceptance
+    - { key: 'net.ipv4.conf.all.accept_redirects', value: '0' }
+    - { key: 'net.ipv4.conf.default.accept_redirects', value: '0' }
+    # Enable reverse path filtering (spoofing protection)
+    - { key: 'net.ipv4.conf.all.rp_filter', value: '1' }
+    - { key: 'net.ipv4.conf.default.rp_filter', value: '1' }
+  become: yes

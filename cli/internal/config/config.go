@@ -3,8 +3,10 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/duchess-devops/duchess-cli/internal/models"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,15 +33,18 @@ type SSHConfig struct {
 
 // WorkspaceConfig represents optional project configuration loaded from duchess.yml.
 type WorkspaceConfig struct {
-	Inventory           string          `yaml:"inventory" json:"inventory,omitempty"`
-	AnsibleVenv         string          `yaml:"ansible_venv" json:"ansibleVenv,omitempty"`
-	RemoteVenv          string          `yaml:"remote_venv" json:"remoteVenv,omitempty"`
-	PollIntervalSeconds int             `yaml:"poll_interval_seconds" json:"pollIntervalSeconds"`
-	ExecTimeoutSeconds  int             `yaml:"exec_timeout_seconds" json:"execTimeoutSeconds"`
-	HistoryDir          string          `yaml:"history_dir" json:"historyDir,omitempty"`
-	SSH                 SSHConfig       `yaml:"ssh" json:"ssh"`
-	Alerts              AlertThresholds `yaml:"alerts" json:"alerts"`
-	ConfigPath          string          `yaml:"-" json:"configPath,omitempty"`
+	Inventory           string            `yaml:"inventory,omitempty" json:"inventory,omitempty"`
+	AnsibleVenv         string            `yaml:"ansible_venv,omitempty" json:"ansibleVenv,omitempty"`
+	RemoteVenv          string            `yaml:"remote_venv,omitempty" json:"remoteVenv,omitempty"`
+	PlaybookVenvs       map[string]string `yaml:"playbook_venvs,omitempty" json:"playbookVenvs,omitempty"`
+	ServerVenvs         map[string]string `yaml:"server_venvs,omitempty" json:"serverVenvs,omitempty"`
+	ServerRemoteVenvs   map[string]string `yaml:"server_remote_venvs,omitempty" json:"serverRemoteVenvs,omitempty"`
+	PollIntervalSeconds int               `yaml:"poll_interval_seconds,omitempty" json:"pollIntervalSeconds"`
+	ExecTimeoutSeconds  int               `yaml:"exec_timeout_seconds,omitempty" json:"execTimeoutSeconds"`
+	HistoryDir          string            `yaml:"history_dir,omitempty" json:"historyDir,omitempty"`
+	SSH                 SSHConfig         `yaml:"ssh,omitempty" json:"ssh"`
+	Alerts              AlertThresholds   `yaml:"alerts,omitempty" json:"alerts"`
+	ConfigPath          string            `yaml:"-" json:"configPath,omitempty"`
 }
 
 // Default returns sensible default workspace configuration.
@@ -48,6 +53,9 @@ func Default() WorkspaceConfig {
 	return WorkspaceConfig{
 		PollIntervalSeconds: 10,
 		ExecTimeoutSeconds:  0, // 0 = no artificial timeout for interactive/long runs
+		PlaybookVenvs:       make(map[string]string),
+		ServerVenvs:         make(map[string]string),
+		ServerRemoteVenvs:   make(map[string]string),
 		SSH: SSHConfig{
 			UseSSHConfig: &useSSHConfig,
 		},
@@ -76,6 +84,157 @@ func (c WorkspaceConfig) EffectiveHistoryDir(workspaceDir string) string {
 		return expandPath(c.HistoryDir, workspaceDir)
 	}
 	return filepath.Join(workspaceDir, ".duchess", "history")
+}
+
+// MatchPlaybookVenv returns a pinned controller venv for playbookPath from playbook_venvs.
+// Checks exact filename (deploy-bybl.yml), stem (deploy-bybl), and glob patterns (deploy-*.yml).
+func (c WorkspaceConfig) MatchPlaybookVenv(playbookPath string) string {
+	if len(c.PlaybookVenvs) == 0 || strings.TrimSpace(playbookPath) == "" {
+		return ""
+	}
+	base := filepath.Base(playbookPath)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	return matchPatternMap(c.PlaybookVenvs, []string{playbookPath, base, stem})
+}
+
+// MatchServerVenv returns a pinned controller venv for target hosts/groups.
+// Priority: inventory host var (duchess_venv) > exact host alias/IP in server_venvs >
+// inventory group in server_venvs > target expression / glob pattern in server_venvs.
+func (c WorkspaceConfig) MatchServerVenv(hosts []*models.Host, targetExpr string) string {
+	for _, h := range hosts {
+		if h != nil && strings.TrimSpace(h.Venv) != "" {
+			return strings.TrimSpace(h.Venv)
+		}
+	}
+	if len(c.ServerVenvs) == 0 {
+		return ""
+	}
+	var hostCandidates []string
+	var groupCandidates []string
+	for _, h := range hosts {
+		if h == nil {
+			continue
+		}
+		if h.Name != "" {
+			hostCandidates = append(hostCandidates, h.Name)
+		}
+		if h.Address != "" {
+			hostCandidates = append(hostCandidates, h.Address)
+		}
+		groupCandidates = append(groupCandidates, h.Groups...)
+	}
+	if v := matchPatternMap(c.ServerVenvs, hostCandidates); v != "" {
+		return v
+	}
+	if t := strings.TrimSpace(targetExpr); t != "" && t != "all" {
+		if v := matchPatternMap(c.ServerVenvs, []string{t}); v != "" {
+			return v
+		}
+	}
+	if v := matchPatternMap(c.ServerVenvs, groupCandidates); v != "" {
+		return v
+	}
+	return ""
+}
+
+// MatchServerRemoteVenv returns a pinned remote Python interpreter venv for target hosts/groups.
+func (c WorkspaceConfig) MatchServerRemoteVenv(hosts []*models.Host, targetExpr string) string {
+	for _, h := range hosts {
+		if h != nil && strings.TrimSpace(h.RemoteVenv) != "" {
+			return strings.TrimSpace(h.RemoteVenv)
+		}
+	}
+	if len(c.ServerRemoteVenvs) == 0 {
+		return ""
+	}
+	var hostCandidates, groupCandidates []string
+	for _, h := range hosts {
+		if h == nil {
+			continue
+		}
+		if h.Name != "" {
+			hostCandidates = append(hostCandidates, h.Name)
+		}
+		if h.Address != "" {
+			hostCandidates = append(hostCandidates, h.Address)
+		}
+		groupCandidates = append(groupCandidates, h.Groups...)
+	}
+	if v := matchPatternMap(c.ServerRemoteVenvs, hostCandidates); v != "" {
+		return v
+	}
+	if t := strings.TrimSpace(targetExpr); t != "" && t != "all" {
+		if v := matchPatternMap(c.ServerRemoteVenvs, []string{t}); v != "" {
+			return v
+		}
+	}
+	return matchPatternMap(c.ServerRemoteVenvs, groupCandidates)
+}
+
+func matchPatternMap(m map[string]string, candidates []string) string {
+	if len(m) == 0 || len(candidates) == 0 {
+		return ""
+	}
+	// 1. Exact matches first (case-sensitive, then case-insensitive)
+	for _, cand := range candidates {
+		if v := strings.TrimSpace(m[cand]); v != "" {
+			return v
+		}
+	}
+	for _, cand := range candidates {
+		low := strings.ToLower(cand)
+		for k, v := range m {
+			if strings.ToLower(k) == low && strings.TrimSpace(v) != "" {
+				return strings.TrimSpace(v)
+			}
+		}
+	}
+	// 2. Glob patterns (longest pattern wins for deterministic specificity)
+	patterns := make([]string, 0, len(m))
+	for k := range m {
+		if strings.ContainsAny(k, "*?[") {
+			patterns = append(patterns, k)
+		}
+	}
+	sort.Slice(patterns, func(i, j int) bool {
+		if len(patterns[i]) != len(patterns[j]) {
+			return len(patterns[i]) > len(patterns[j])
+		}
+		return patterns[i] < patterns[j]
+	})
+	for _, pat := range patterns {
+		for _, cand := range candidates {
+			if ok, err := filepath.Match(pat, cand); err == nil && ok {
+				if v := strings.TrimSpace(m[pat]); v != "" {
+					return v
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// Save writes cfg to path (or <workspaceDir>/duchess.yml if path is empty).
+func Save(workspaceDir, path string, cfg WorkspaceConfig) (string, error) {
+	if path == "" {
+		if cfg.ConfigPath != "" {
+			path = cfg.ConfigPath
+		} else {
+			path = filepath.Join(workspaceDir, "duchess.yml")
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	data, err := yaml.Marshal(&cfg)
+	if err != nil {
+		return "", err
+	}
+	header := "# Duchess Workspace Configuration\n"
+	if err := os.WriteFile(path, append([]byte(header), data...), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // Load reads workspace configuration from <workspace>/duchess.yml (or duchess.yaml),
@@ -156,6 +315,24 @@ func mergeConfig(dst *WorkspaceConfig, src WorkspaceConfig) {
 	}
 	if src.RemoteVenv != "" {
 		dst.RemoteVenv = src.RemoteVenv
+	}
+	for k, v := range src.PlaybookVenvs {
+		if dst.PlaybookVenvs == nil {
+			dst.PlaybookVenvs = make(map[string]string)
+		}
+		dst.PlaybookVenvs[k] = v
+	}
+	for k, v := range src.ServerVenvs {
+		if dst.ServerVenvs == nil {
+			dst.ServerVenvs = make(map[string]string)
+		}
+		dst.ServerVenvs[k] = v
+	}
+	for k, v := range src.ServerRemoteVenvs {
+		if dst.ServerRemoteVenvs == nil {
+			dst.ServerRemoteVenvs = make(map[string]string)
+		}
+		dst.ServerRemoteVenvs[k] = v
 	}
 	if src.PollIntervalSeconds > 0 {
 		dst.PollIntervalSeconds = src.PollIntervalSeconds

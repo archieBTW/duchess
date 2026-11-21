@@ -1,0 +1,107 @@
+---
+# ==============================================================================
+# Role: bybl_backend
+# Deploys bybl backend with secrets, isolated PostgreSQL, and dual-port Go services
+# ==============================================================================
+
+- name: Create base directory for bybl on server
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0755'
+  loop:
+    - "{{ bybl_dir }}"
+    - "{{ bybl_dir }}/Backend"
+    - "{{ bybl_dir }}/Backend/uploads"
+    - "{{ bybl_dir }}/gofyr_admin"
+  become: yes
+
+- name: Compile bybl Backend Go binary locally for Linux amd64 using Go 1.27
+  command: go build -ldflags="-s -w" -o main .
+  args:
+    chdir: "{{ local_code_root }}/bybl/Backend"
+  environment:
+    CGO_ENABLED: "0"
+    GOOS: "linux"
+    GOARCH: "amd64"
+  delegate_to: localhost
+  become: no
+
+- name: Sync Backend source code and pre-compiled binary to server
+  synchronize:
+    src: "{{ local_code_root }}/bybl/Backend/"
+    dest: "{{ bybl_dir }}/Backend/"
+    delete: yes
+    rsync_opts:
+      - "--exclude=.git"
+      - "--exclude=.env"
+      - "--exclude=*.db"
+      - "--exclude=uploads/*"
+  become: yes
+
+- name: Sync gofyr_admin dependency package to server
+  synchronize:
+    src: "{{ local_code_root }}/bybl/gofyr_admin/"
+    dest: "{{ bybl_dir }}/gofyr_admin/"
+    delete: yes
+    rsync_opts:
+      - "--exclude=.git"
+  become: yes
+
+- name: Deploy secure .env file with secrets to compose directory
+  template:
+    src: env.j2
+    dest: "{{ bybl_dir }}/.env"
+    owner: root
+    group: root
+    mode: '0600'
+  become: yes
+
+- name: Symlink .env into Backend directory
+  file:
+    src: "{{ bybl_dir }}/.env"
+    dest: "{{ bybl_dir }}/Backend/.env"
+    state: link
+    force: yes
+  become: yes
+
+- name: Deploy hardened docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ bybl_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: '0644'
+  become: yes
+
+- name: Build and start bybl backend containers via Docker Compose
+  command: docker compose up -d --build --force-recreate
+  args:
+    chdir: "{{ bybl_dir }}"
+  become: yes
+
+- name: Wait for PostgreSQL and bybl-api to become healthy
+  uri:
+    url: "http://127.0.0.1:8080/health"
+    status_code: 200
+  register: api_health
+  until: api_health.status == 200
+  retries: 24
+  delay: 5
+  become: yes
+
+- name: Verify gofyrAdmin endpoint responsiveness
+  uri:
+    url: "http://127.0.0.1:8081/health"
+    status_code: 200
+  register: admin_health
+  until: admin_health.status == 200
+  retries: 12
+  delay: 3
+  become: yes
+
+- name: Log bybl deployment success
+  debug:
+    msg: "bybl Backend successfully deployed: API is healthy on :8080, gofyrAdmin is healthy on :8081, Postgres isolated in app-network."

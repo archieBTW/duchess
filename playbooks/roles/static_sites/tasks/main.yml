@@ -1,0 +1,110 @@
+---
+# ==============================================================================
+# Role: static_sites
+# Synchronizes built static web assets (Flutter Web / Vite) to remote web roots
+# Supports deploying all sites or individual sites via:
+#   -e site=bybl (or comma-separated: -e site=bybl,archbtw)
+#   -e target_site=bybl
+#   --tags bybl
+#   Optional local build before sync: -e build=true
+# ==============================================================================
+
+- name: Resolve requested site filter from CLI variables or tags
+  vars:
+    _cli_site: "{{ site | default(target_site | default('')) | string | trim | lower }}"
+    _known_site_tags:
+      - archbtw
+      - bybl
+      - bybl_web
+      - bybl_frontend
+      - archerwoods
+      - fyrweb
+      - folja
+      - libretrac
+      - theolivebranch
+      - welledumacated
+      - fyr_software
+      - fyr
+      - fyrwebsite
+      - carlyleauto
+      - carlyle
+      - bcd_landing
+      - beats
+      - beats_by_arch
+      - beats.archerwoods.dev
+    _tag_matches: "{{ ansible_run_tags | intersect(_known_site_tags) }}"
+  set_fact:
+    _requested_sites: "{{ _cli_site.split(',') | map('trim') | select() | list if (_cli_site | length > 0) else (_tag_matches if ('all' not in ansible_run_tags and 'static_sites' not in ansible_run_tags and 'deploy' not in ansible_run_tags and (_tag_matches | length > 0)) else ['all']) }}"
+    selected_static_sites: []
+
+- name: Filter static sites matching target selection
+  set_fact:
+    selected_static_sites: "{{ selected_static_sites + [item] }}"
+  loop: "{{ hosted_sites }}"
+  when:
+    - item.type == 'static'
+    - "'all' in _requested_sites or ((item.site_keys | default([item.name, item.domain])) | map('lower') | list | intersect(_requested_sites) | length > 0)"
+
+- name: Display selected static sites for deployment
+  debug:
+    msg: "Deploying static sites: {{ selected_static_sites | map(attribute='name') | list | join(', ') if (selected_static_sites | length > 0) else 'none (no matching static sites)' }}"
+
+- name: Optionally build selected static sites locally when build=true
+  command: "{{ playbook_dir }}/../scripts/build_all_local.sh {{ item.name }}"
+  loop: "{{ selected_static_sites }}"
+  when:
+    - (build | default(build_local | default(false))) | bool
+  delegate_to: localhost
+  become: no
+
+- name: Check local build directories on control machine
+  stat:
+    path: "{{ item.local_build_dir }}"
+  loop: "{{ selected_static_sites }}"
+  register: local_build_stats
+  delegate_to: localhost
+  become: no
+
+- name: Create remote webroot directories
+  file:
+    path: "{{ item.web_root }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+    recurse: yes
+  loop: "{{ selected_static_sites }}"
+  become: yes
+
+- name: Synchronize built assets to remote web roots
+  synchronize:
+    src: "{{ item.0.local_build_dir }}/"
+    dest: "{{ item.0.web_root }}/"
+    delete: yes
+    rsync_opts:
+      - "--exclude=.DS_Store"
+      - "--exclude=*.map"
+  loop: "{{ selected_static_sites | zip(local_build_stats.results | default([])) | list }}"
+  when:
+    - item.1.stat is defined
+    - item.1.stat.exists
+  become: yes
+
+- name: Warn if any static site build directory was not found locally
+  debug:
+    msg: "WARNING: Local build directory for {{ item.0.name }} ({{ item.0.local_build_dir }}) does not exist. Run scripts/build_all_local.sh {{ item.0.name }} first to generate web assets!"
+  loop: "{{ selected_static_sites | zip(local_build_stats.results | default([])) | list }}"
+  when:
+    - item.1.stat is defined
+    - not item.1.stat.exists
+
+- name: Set correct permissions on deployed web root files
+  file:
+    path: "{{ item.web_root }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+    recurse: yes
+  loop: "{{ selected_static_sites }}"
+  become: yes

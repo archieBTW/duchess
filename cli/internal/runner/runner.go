@@ -23,19 +23,21 @@ import (
 // PlaybookOptions configures Ansible playbook execution, including virtualenv isolation,
 // check/diff modes, tags, vault credentials, verbosity, and live output streaming.
 type PlaybookOptions struct {
-	Venv          string // Explicit controller Python virtualenv path
-	ItemVenv      string // Playbook header (# duchess:venv:) virtualenv path
-	ConfigVenv    string // Workspace default virtualenv path
-	WorkspaceDir  string // Workspace root for resolving relative venv paths
-	RemoteVenv    string // Remote host virtualenv path (sets ansible_python_interpreter)
-	CheckMode     bool
-	DiffMode      bool
-	Become        bool
-	Tags          string
-	SkipTags      string
-	VaultPassFile string
-	Verbosity     int               // 0..4 => -v..-vvvv
-	OnOutput      func(line string) // Optional real-time line streaming callback
+	Venv               string // Explicit controller Python virtualenv path (--venv / TUI override)
+	ItemVenv           string // Playbook header (# duchess:venv:) virtualenv path
+	PlaybookConfigVenv string // Pinned playbook venv from duchess.yml playbook_venvs
+	ServerConfigVenv   string // Pinned server/group venv from duchess.yml server_venvs or inventory duchess_venv
+	ConfigVenv         string // Global workspace default virtualenv path
+	WorkspaceDir       string // Workspace root for resolving relative venv paths
+	RemoteVenv         string // Remote host virtualenv path (sets ansible_python_interpreter)
+	CheckMode          bool
+	DiffMode           bool
+	Become             bool
+	Tags               string
+	SkipTags           string
+	VaultPassFile      string
+	Verbosity          int               // 0..4 => -v..-vvvv
+	OnOutput           func(line string) // Optional real-time line streaming callback
 }
 
 // ListItems discovers all playbooks or scripts in a directory and parses Duchess header metadata.
@@ -223,7 +225,14 @@ func RunPlaybookWithOptions(
 		}
 	}
 
-	venvPath, binPath, isExplicit, err := ResolvePlaybookVenv(pbOpts.Venv, pbOpts.ItemVenv, pbOpts.ConfigVenv, pbOpts.WorkspaceDir)
+	venvPath, binPath, isExplicit, _, err := ResolvePlaybookVenvLayered(VenvLookup{
+		ExplicitVenv:       pbOpts.Venv,
+		ItemVenv:           pbOpts.ItemVenv,
+		PlaybookConfigVenv: pbOpts.PlaybookConfigVenv,
+		ServerConfigVenv:   pbOpts.ServerConfigVenv,
+		ConfigVenv:         pbOpts.ConfigVenv,
+		WorkspaceDir:       pbOpts.WorkspaceDir,
+	})
 	if err != nil {
 		// Explicit/configured venv is missing ansible-playbook -> fail fast, never silently fall back
 		return nil, err
@@ -314,7 +323,17 @@ func runWithAnsibleBinary(
 
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Env = BuildVenvEnv(os.Environ(), venvPath)
+	env := BuildVenvEnv(os.Environ(), venvPath)
+	// Auto-load ansible.cfg placed alongside the playbook (e.g. playbooks/ansible.cfg)
+	if os.Getenv("ANSIBLE_CONFIG") == "" {
+		if absPb, err := filepath.Abs(playbookPath); err == nil {
+			cfgCandidate := filepath.Join(filepath.Dir(absPb), "ansible.cfg")
+			if st, err := os.Stat(cfgCandidate); err == nil && !st.IsDir() {
+				env = append(env, "ANSIBLE_CONFIG="+cfgCandidate)
+			}
+		}
+	}
+	cmd.Env = env
 
 	engineLabel := "ansible-playbook"
 	if venvPath != "" {

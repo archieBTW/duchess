@@ -1,0 +1,16 @@
+---
+# duchess:name: Configure Nginx & Certbot SSL
+# duchess:description: Deploy hardened Nginx config, all site vhosts, rate limiting, and Let's Encrypt SSL renewal
+# duchess:category: server-config
+
+- name: Configure Nginx Reverse Proxy and Certbot SSL
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+
+  roles:
+    - role: nginx
+      tags: [nginx, web]
+    - role: certbot
+      tags: [certbot, ssl]

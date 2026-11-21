@@ -41,6 +41,27 @@ func TestResolvePlaybookVenvPrecedenceAndExecution(t *testing.T) {
 		t.Fatalf("expected explicit venv, got v=%q bin=%q isExp=%v err=%v", v, bin, isExp, err)
 	}
 
+	// 2b. Layered precedence: PlaybookConfigVenv > ServerConfigVenv > ConfigVenv
+	pbCfgVenv := createFakeVenv(t, ws, "pb-venv", "#!/usr/bin/env bash\necho pb\n")
+	srvCfgVenv := createFakeVenv(t, ws, "srv-venv", "#!/usr/bin/env bash\necho srv\n")
+	v, _, _, src, err := ResolvePlaybookVenvLayered(VenvLookup{
+		PlaybookConfigVenv: pbCfgVenv,
+		ServerConfigVenv:   srvCfgVenv,
+		ConfigVenv:         autoVenv,
+		WorkspaceDir:       ws,
+	})
+	if err != nil || v != pbCfgVenv || !strings.Contains(src, "playbook_venvs") {
+		t.Fatalf("expected PlaybookConfigVenv to beat ServerConfigVenv, got v=%q src=%q err=%v", v, src, err)
+	}
+	v, _, _, src, err = ResolvePlaybookVenvLayered(VenvLookup{
+		ServerConfigVenv: srvCfgVenv,
+		ConfigVenv:       autoVenv,
+		WorkspaceDir:     ws,
+	})
+	if err != nil || v != srvCfgVenv || !strings.Contains(src, "server_venvs") {
+		t.Fatalf("expected ServerConfigVenv to beat ConfigVenv, got v=%q src=%q err=%v", v, src, err)
+	}
+
 	// 3. Explicit missing venv fails fast
 	if _, _, _, err := ResolvePlaybookVenv(filepath.Join(ws, "nonexistent"), "", "", ws); err == nil {
 		t.Fatalf("expected error for missing explicit venv")

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,11 +14,21 @@ import (
 	"github.com/duchess-devops/duchess-cli/internal/models"
 )
 
+func writeTestInventory(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "hosts.ini")
+	content := "[production]\nprod-app-01 ansible_host=127.0.0.1 ansible_port=22\n"
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func TestTuiRendersAllViewsAndDiscoveryData(t *testing.T) {
 	wsRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	cfg := Config{
 		WorkspaceDir:  wsRoot,
-		InventoryPath: filepath.Join(wsRoot, "inventory", "hosts.ini"),
+		InventoryPath: writeTestInventory(t),
 	}
 	m := NewModel(cfg)
 	m.width = 130
@@ -94,8 +105,8 @@ func TestTuiRendersAllViewsAndDiscoveryData(t *testing.T) {
 	// Switch to Automation [4] and open generator modal [g]
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	m = updated.(Model)
-	if !strings.Contains(m.View(), "system-health-check.yml") {
-		t.Fatalf("expected automation library to list system-health-check.yml")
+	if len(m.automations) == 0 || !strings.Contains(m.View(), m.automations[0].FileName) {
+		t.Fatalf("expected automation library to list first workspace playbook")
 	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
 	m = updated.(Model)
@@ -109,7 +120,7 @@ func TestTuiLaunchPromptsForSSHUser(t *testing.T) {
 	wsRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	m := NewModel(Config{
 		WorkspaceDir:      wsRoot,
-		InventoryPath:     filepath.Join(wsRoot, "inventory", "hosts.ini"),
+		InventoryPath:     writeTestInventory(t),
 		PromptSSHOnLaunch: true,
 	})
 	m.width = 120
@@ -155,7 +166,7 @@ func TestInspectorSubTabsKeepFixedDimensions(t *testing.T) {
 	wsRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	m := NewModel(Config{
 		WorkspaceDir:  wsRoot,
-		InventoryPath: filepath.Join(wsRoot, "inventory", "hosts.ini"),
+		InventoryPath: writeTestInventory(t),
 	})
 
 	// Populate 1 container, 2 webapps, and 60 long-description services
@@ -230,7 +241,7 @@ func TestTuiPlaybookVenvModalAlertsSearchAndStreaming(t *testing.T) {
 	wsRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	m := NewModel(Config{
 		WorkspaceDir:  wsRoot,
-		InventoryPath: filepath.Join(wsRoot, "inventory", "hosts.ini"),
+		InventoryPath: writeTestInventory(t),
 	})
 	m.width = 130
 	m.height = 40

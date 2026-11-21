@@ -350,6 +350,9 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m *Model) reloadWorkspace() {
+	if loaded := config.Load(m.cfg.WorkspaceDir); loaded.ConfigPath != "" {
+		m.wsCfg = loaded
+	}
 	inv, err := inventory.Load(m.cfg.InventoryPath)
 	if err != nil {
 		inv = inventory.New(m.cfg.InventoryPath)
@@ -370,6 +373,11 @@ func (m *Model) reloadWorkspace() {
 	}
 
 	pbs, _ := runner.ListItems(filepath.Join(m.cfg.WorkspaceDir, "playbooks"), "playbook")
+	for i := range pbs {
+		if pbs[i].Venv == "" {
+			pbs[i].Venv = m.wsCfg.MatchPlaybookVenv(pbs[i].Path)
+		}
+	}
 	scs, _ := runner.ListItems(filepath.Join(m.cfg.WorkspaceDir, "scripts"), "script")
 	m.automations = append(pbs, scs...)
 	m.venvs = runner.DiscoverVenvs(m.cfg.WorkspaceDir)

@@ -1,0 +1,178 @@
+# ==============================================================================
+# Global Configuration Variables
+# ==============================================================================
+
+# Let's Encrypt / Certbot Notification Email
+certbot_admin_email: "arch@archerwoods.dev"
+
+# Swap Space (MB) - critical on e2-micro (1GB RAM) to prevent OOM
+swap_file_size_mb: 2048
+
+# Base application directory on remote server
+apps_base_dir: "/opt"
+bybl_dir: "/opt/bybl"
+
+# Local root code directory relative to ansible/ directory
+local_code_root: "{{ playbook_dir }}/../.."
+
+# ==============================================================================
+# Nginx Hardening & Rate Limiting Settings
+# ==============================================================================
+nginx_rate_limit_static: "30r/s"
+nginx_rate_limit_api: "20r/s"
+nginx_conn_limit: 25
+
+# ==============================================================================
+# Hosted Sites Definitions
+# ==============================================================================
+hosted_sites:
+  # 1. archbtw.sh
+  - name: "archbtw"
+    site_keys: ["archbtw", "archbtw.sh"]
+    domain: "archbtw.sh"
+    aliases:
+      - "www.archbtw.sh"
+    type: "static"
+    web_root: "/var/www/archbtw.sh/html"
+    local_build_dir: "{{ local_code_root }}/archbtw.sh/build/web"
+    rate_limit_zone: "static_site"
+    rate_limit_burst: 50
+
+  # 2. bybl.dev (Frontend)
+  - name: "bybl_web"
+    site_keys: ["bybl", "bybl_web", "bybl_frontend", "bybl.dev"]
+    domain: "bybl.dev"
+    aliases:
+      - "www.bybl.dev"
+    type: "static"
+    web_root: "/var/www/bybl.dev/html"
+    local_build_dir: "{{ local_code_root }}/bybl/Frontend/build/web"
+    rate_limit_zone: "static_site"
+    rate_limit_burst: 50
+
+  # 3. api.bybl.dev (Go Backend REST API)
+  - name: "bybl_api"
+    site_keys: ["bybl", "bybl_api", "bybl_backend", "api.bybl.dev"]
+    domain: "api.bybl.dev"
+    aliases: []
+    type: "proxy"
+    proxy_pass: "http://127.0.0.1:8080"
+    rate_limit_zone: "api_zone"
+    rate_limit_burst: 30
+
+  # 4. gofyr.bybl.dev (gofyrAdmin Management Panel)
+  - name: "bybl_gofyr"
+    site_keys: ["bybl", "bybl_gofyr", "bybl_backend", "gofyr.bybl.dev"]
+    domain: "gofyr.bybl.dev"
+    aliases: []
+    type: "proxy"
+    proxy_pass: "http://127.0.0.1:8081"
+    rate_limit_zone: "api_zone"
+    rate_limit_burst: 30
+
+  # 5. archerwoods.dev (fyrWeb)
+  - name: "archerwoods"
+    site_keys: ["archerwoods", "fyrweb", "archerwoods.dev"]
+    domain: "archerwoods.dev"
+    aliases:
+      - "www.archerwoods.dev"
+    type: "static"
+    web_root: "/var/www/archerwoods.dev/html"
+    local_build_dir: "{{ local_code_root }}/fyrWeb/build/web"
+    rate_limit_zone: "static_site"
+    rate_limit_burst: 50
+
+  # 6. folja.archerwoods.dev (folja.app)
+  - name: "folja"
+    site_keys: ["folja", "folja.app", "folja.archerwoods.dev"]
+    domain: "folja.archerwoods.dev"
+    aliases: []
+    type: "static"
+    web_root: "/var/www/folja.archerwoods.dev/html"
+    local_build_dir: "{{ local_code_root }}/folja.app/dist"
+    rate_limit_zone: "static_site"
+    rate_limit_burst: 50
+
+  # 7. libretrac.site
+  - name: "libretrac"
+    site_keys: ["libretrac", "libretrac.site"]
+    domain: "libretrac.site"
+    aliases:
+      - "www.libretrac.site"
+    type: "static"
+    web_root: "/var/www/libretrac.site/html"
+    local_build_dir: "{{ local_code_root }}/libretrac/build/web"
+    rate_limit_zone: "static_site"
+    rate_limit_burst: 50
+
+  # 8. theolivebranch.press (with RSS feed proxy)
+  - name: "theolivebranch"
+    site_keys: ["theolivebranch", "theolivebranch.press"]
+    domain: "theolivebranch.press"
+    aliases:
+      - "www.theolivebranch.press"
+    type: "static"
+    web_root: "/var/www/theolivebranch.press/html"
+    local_build_dir: "{{ local_code_root }}/theolivebranch/build/web"
+    rate_limit_zone: "static_site"
+    rate_limit_burst: 50
+    custom_nginx_location: |
+      # Secure Proxy block for RSS feeds
+      location /proxy/ {
+          resolver 8.8.8.8 1.1.1.1 valid=300s ipv6=off;
+          set $target_url $arg_url;
+          if ($request_uri ~* ^/proxy/(http.*)$) {
+              set $target_url $1;
+          }
+          proxy_pass $target_url;
+          proxy_ssl_server_name on;
+          proxy_set_header Host $proxy_host;
+          proxy_set_header User-Agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36";
+      }
+
+  # 9. welledumacated.dev
+  - name: "welledumacated"
+    site_keys: ["welledumacated", "welledumacated.dev"]
+    domain: "welledumacated.dev"
+    aliases:
+      - "www.welledumacated.dev"
+    type: "static"
+    web_root: "/var/www/welledumacated.dev/html"
+    local_build_dir: "{{ local_code_root }}/welledumacated.dev/build/web"
+    rate_limit_zone: "static_site"
+    rate_limit_burst: 50
+
+  # 10. fyr.software (fyrDE/fyrwebsite)
+  - name: "fyr_software"
+    site_keys: ["fyr_software", "fyr", "fyrwebsite", "fyr.software"]
+    domain: "fyr.software"
+    aliases:
+      - "www.fyr.software"
+    type: "static"
+    web_root: "/var/www/fyr.software/html"
+    local_build_dir: "{{ local_code_root }}/fyrDE/fyrwebsite/build/web"
+    rate_limit_zone: "static_site"
+    rate_limit_burst: 50
+
+  # 11. carlyleauto.online (bcd_landing - Manual DNS)
+  - name: "carlyleauto"
+    site_keys: ["carlyleauto", "carlyle", "bcd_landing", "carlyleauto.online"]
+    domain: "carlyleauto.online"
+    aliases:
+      - "www.carlyleauto.online"
+    type: "static"
+    web_root: "/var/www/carlyleauto.online/html"
+    local_build_dir: "{{ local_code_root }}/bcd_landing/build/web"
+    rate_limit_zone: "static_site"
+    rate_limit_burst: 50
+
+  # 12. beats.archerwoods.dev (Beats by Arch)
+  - name: "beats"
+    site_keys: ["beats", "beats_by_arch", "beats.archerwoods.dev"]
+    domain: "beats.archerwoods.dev"
+    aliases: []
+    type: "static"
+    web_root: "/var/www/beats.archerwoods.dev/html"
+    local_build_dir: "{{ local_code_root }}/beats-by-arch/build/web"
+    rate_limit_zone: "static_site"
+    rate_limit_burst: 50

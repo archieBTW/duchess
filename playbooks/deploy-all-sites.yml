@@ -1,0 +1,26 @@
+---
+# duchess:name: Deploy All Static Sites
+# duchess:description: Build locally and sync all static web apps (or filter with site=foo,bar), then reload Nginx
+# duchess:category: site-deploy
+# duchess:vars: build=true, site=all
+
+- name: Build and Deploy Static Sites
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+  vars:
+    build: true
+
+  roles:
+    - role: static_sites
+      tags: [static_sites, deploy]
+
+  post_tasks:
+    - name: Reload Nginx to flush cached assets
+      service:
+        name: nginx
+        state: reloaded
+      when:
+        - selected_static_sites is defined
+        - selected_static_sites | length > 0

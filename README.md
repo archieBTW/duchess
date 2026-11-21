@@ -74,20 +74,25 @@ Duchess resolves the controller Python virtualenv in priority order:
 
 1. Explicit `--venv /path/to/venv` flag (or TUI Run modal **Python Venv** field, `Ctrl+V` cycles detected venvs)
 2. Playbook header metadata: `# duchess:venv: /path/to/venv`
-3. Workspace config (`ansible_venv:` in `duchess.yml` or `DUCHESS_ANSIBLE_VENV` env var)
-4. Active `$VIRTUAL_ENV` or auto-detected `<workspace>/.venv` / `<workspace>/venv`
+3. Per-playbook pin in `duchess.yml` (`playbook_venvs:`, supports exact filenames or globs like `deploy-*.yml`)
+4. Per-server / per-group pin (`duchess_venv=` in `hosts.ini`/`hosts.yml`, or `server_venvs:` in `duchess.yml`)
+5. Workspace global default (`ansible_venv:` in `duchess.yml` or `DUCHESS_ANSIBLE_VENV` env var)
+6. Active `$VIRTUAL_ENV` or auto-detected `<workspace>/.venv` / `<workspace>/venv`
 
-When an explicit/configured venv is specified and does not contain `bin/ansible-playbook`, Duchess fails fast with a clear error rather than silently falling back. You can also target a remote host virtualenv via `--remote-venv /srv/app/.venv` (or `# duchess:remote_venv:`), which injects `-e ansible_python_interpreter=/srv/app/.venv/bin/python`.
+When an explicit or pinned venv does not contain `bin/ansible-playbook`, Duchess fails fast with a clear error rather than silently falling back. You can also pin remote host Python interpreters via `--remote-venv`, `# duchess:remote_venv:`, `duchess_remote_venv=` in inventory, or `server_remote_venvs:` in `duchess.yml`.
 
 ```bash
-# Discover available Ansible virtualenvs and versions
-./bin/duchess playbook venvs
+# Inspect configured venv pins and discovered local virtualenvs
+./bin/duchess venv show
 
-# Run a playbook using a specific controller venv + diff/check/tags
-./bin/duchess playbook run deploy-nginx-site.yml --venv ~/venvs/ansible-2.17 --limit webservers --check --diff --tags nginx -vv
+# Pin default venvs in duchess.yml (globally, per-playbook/glob, or per-server/group)
+./bin/duchess venv pin ~/venvs/ansible --default
+./bin/duchess venv pin ~/venvs/we-iac --playbook 'deploy-*.yml'
+./bin/duchess venv pin ~/venvs/prod-ansible --server production
+./bin/duchess venv pin /opt/app/.venv --server prod-app-01 --remote
 
-# Pin a remote Python interpreter venv
-./bin/duchess playbook run app-migrate.yml --venv ./.venv --remote-venv /opt/app/.venv
+# One-off override via --venv
+./bin/duchess playbook run deploy-bybl.yml --venv ~/venvs/ansible-2.17 --limit prod-app-01 --check --diff
 ```
 
 ---
@@ -127,6 +132,14 @@ Place a `duchess.yml` in your workspace root (or `~/.config/duchess/config.yml`)
 inventory: inventory/hosts.ini
 ansible_venv: ~/venvs/ansible
 remote_venv: /opt/app/.venv
+playbook_venvs:
+  deploy-*.yml: ~/venvs/we-iac
+  provision-server.yml: ~/venvs/ansible-2.17
+server_venvs:
+  production: ~/venvs/prod-ansible
+  prod-app-01: ~/venvs/prod-ansible
+server_remote_venvs:
+  prod-app-01: /opt/app/.venv
 poll_interval_seconds: 10
 exec_timeout_seconds: 0 # 0 = unlimited
 ssh:

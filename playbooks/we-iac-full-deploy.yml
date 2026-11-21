@@ -1,0 +1,59 @@
+---
+# duchess:name: WE-IAC Full Provision & Deploy
+# duchess:description: Complete end-to-end server provisioning, bybl backend, Nginx/SSL, and all static sites
+# duchess:category: full-deploy
+# duchess:vars: build=true, site=all
+
+- name: Provision and Deploy Complete Web Infrastructure
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+    - [ "group_vars/all/vault.yml", "group_vars/all/vault.yml.example" ]
+  vars:
+    build: true
+    _target_sites: "{{ (site | default(target_site | default('all')) | string | lower).split(',') | map('trim') | select() | list }}"
+    _full_provision: "{{ ('all' in _target_sites) or (provision | default(false) | bool) }}"
+
+  roles:
+    - role: common
+      tags: [common, base]
+      when: _full_provision | bool
+
+    - role: firewall
+      tags: [firewall, security]
+      when: _full_provision | bool
+
+    - role: docker
+      tags: [docker]
+      when: _full_provision | bool
+
+    - role: bybl_backend
+      tags: [bybl, bybl_backend, bybl_api, bybl_gofyr, backend]
+      when: "'all' in _target_sites or (_target_sites | intersect(['bybl', 'bybl_backend', 'bybl_api', 'bybl_gofyr']) | length > 0)"
+
+    - role: nginx
+      tags: [nginx, web, beats, beats_by_arch]
+      when: _full_provision | bool or ('beats' in _target_sites) or ('beats_by_arch' in _target_sites) or ('beats.archerwoods.dev' in _target_sites)
+
+    - role: certbot
+      tags: [certbot, ssl, beats, beats_by_arch]
+      when: _full_provision | bool or ('beats' in _target_sites) or ('beats_by_arch' in _target_sites) or ('beats.archerwoods.dev' in _target_sites)
+
+    - role: static_sites
+      tags: [static_sites, deploy]
+      when: "'all' in _target_sites or (_target_sites | difference(['bybl_backend', 'bybl_api', 'bybl_gofyr']) | length > 0)"
+
+  post_tasks:
+    - name: Reload Nginx when static sites are updated
+      service:
+        name: nginx
+        state: reloaded
+      when:
+        - selected_static_sites is defined
+        - selected_static_sites | length > 0
+      tags: [static_sites, deploy]
+
+    - name: Final Service Status Report
+      debug:
+        msg: "WE-IAC deployment complete ({{ _target_sites | join(', ') }})."

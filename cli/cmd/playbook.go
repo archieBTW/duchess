@@ -53,10 +53,17 @@ var pbListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List playbooks in the workspace",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dir := filepath.Join(resolveWorkspace(), "playbooks")
+		ws := resolveWorkspace()
+		wsCfg := loadWorkspaceConfig()
+		dir := filepath.Join(ws, "playbooks")
 		items, err := runner.ListItems(dir, "playbook")
 		if err != nil {
 			return err
+		}
+		for i := range items {
+			if items[i].Venv == "" {
+				items[i].Venv = wsCfg.MatchPlaybookVenv(items[i].Path)
+			}
 		}
 		if flagJSON {
 			return printJSON(items)
@@ -195,6 +202,9 @@ var pbRunCmd = &cobra.Command{
 		}
 		remoteVenv := pbRemoteVenv
 		if remoteVenv == "" {
+			remoteVenv = wsCfg.MatchServerRemoteVenv(hosts, pbLimit)
+		}
+		if remoteVenv == "" {
 			remoteVenv = wsCfg.RemoteVenv
 		}
 
@@ -210,17 +220,19 @@ var pbRunCmd = &cobra.Command{
 		}
 
 		pbOpts := runner.PlaybookOptions{
-			Venv:          explicitVenv,
-			ConfigVenv:    wsCfg.AnsibleVenv,
-			WorkspaceDir:  ws,
-			RemoteVenv:    remoteVenv,
-			CheckMode:     pbCheckMode,
-			DiffMode:      pbDiffMode,
-			Become:        pbBecome,
-			Tags:          pbTags,
-			SkipTags:      pbSkipTags,
-			VaultPassFile: pbVaultPassFile,
-			Verbosity:     pbVerbosity,
+			Venv:               explicitVenv,
+			PlaybookConfigVenv: wsCfg.MatchPlaybookVenv(pbPath),
+			ServerConfigVenv:   wsCfg.MatchServerVenv(hosts, pbLimit),
+			ConfigVenv:         wsCfg.AnsibleVenv,
+			WorkspaceDir:       ws,
+			RemoteVenv:         remoteVenv,
+			CheckMode:          pbCheckMode,
+			DiffMode:           pbDiffMode,
+			Become:             pbBecome,
+			Tags:               pbTags,
+			SkipTags:           pbSkipTags,
+			VaultPassFile:      pbVaultPassFile,
+			Verbosity:          pbVerbosity,
 		}
 		if !flagJSON {
 			pbOpts.OnOutput = func(line string) {

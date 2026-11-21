@@ -1,0 +1,22 @@
+---
+# Copy this file to playbooks/group_vars/all/vault.yml (gitignored)
+# and fill in real production secrets (or encrypt with ansible-vault).
+
+vault_postgres_user: "bybl_user"
+vault_postgres_password: "CHANGE_ME_STRONG_DB_PASSWORD"
+vault_postgres_db: "bybl_db"
+
+vault_jwt_secret: "CHANGE_ME_STRONG_JWT_SECRET"
+vault_admin_email: "arch@archerwoods.dev"
+vault_admin_password: "CHANGE_ME_ADMIN_PASSWORD"
+
+vault_bible_key: ""
+vault_esv_key: ""
+vault_resend_api_key: ""
+vault_email_address: "noreply@bybl.dev"
+
+vault_wasabi_region: "us-east-1"
+vault_wasabi_endpoint: ""
+vault_wasabi_access_key: ""
+vault_wasabi_secret_key: ""
+vault_wasabi_bucket: ""

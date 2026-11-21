@@ -1,0 +1,24 @@
+---
+# duchess:name: Deploy folja.archerwoods.dev (folja.app)
+# duchess:description: Build locally (Node/Vite) and deploy folja.archerwoods.dev, then reload Nginx
+# duchess:category: site-deploy
+# duchess:vars: build=true
+
+- name: Deploy folja.archerwoods.dev
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+  vars:
+    build: true
+    target_site: "folja"
+
+  roles:
+    - role: static_sites
+
+  post_tasks:
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
+      when: selected_static_sites | default([]) | length > 0

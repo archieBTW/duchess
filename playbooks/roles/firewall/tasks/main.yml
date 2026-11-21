@@ -1,0 +1,85 @@
+---
+# ==============================================================================
+# Role: firewall
+# Hardened UFW configuration, strict port isolation, and Fail2ban integration
+# ==============================================================================
+
+- name: Set UFW default incoming policy to DENY
+  ufw:
+    direction: incoming
+    default: deny
+  become: yes
+
+- name: Set UFW default outgoing policy to ALLOW
+  ufw:
+    direction: outgoing
+    default: allow
+  become: yes
+
+- name: Allow SSH on port 22 with built-in rate-limiting
+  ufw:
+    rule: limit
+    port: '22'
+    proto: tcp
+    comment: "Rate-limited SSH"
+  become: yes
+
+- name: Allow public HTTP traffic on port 80
+  ufw:
+    rule: allow
+    port: '80'
+    proto: tcp
+    comment: "Nginx HTTP and Lets Encrypt validation"
+  become: yes
+
+- name: Allow public HTTPS traffic on port 443
+  ufw:
+    rule: allow
+    port: '443'
+    proto: tcp
+    comment: "Nginx HTTPS SSL"
+  become: yes
+
+- name: Explicitly DENY external access to PostgreSQL (5432)
+  ufw:
+    rule: deny
+    port: '5432'
+    proto: tcp
+    comment: "Strict lockdown: PostgreSQL isolated to internal Docker network"
+  become: yes
+
+- name: Explicitly DENY external access to internal backend ports (8080, 8081)
+  ufw:
+    rule: deny
+    port: "{{ item }}"
+    proto: tcp
+    comment: "Internal service port - access strictly via Nginx reverse proxy"
+  loop:
+    - '8080'
+    - '8081'
+  become: yes
+
+- name: Enable and reload UFW
+  ufw:
+    state: enabled
+  become: yes
+
+# ==============================================================================
+# Fail2ban Deployment
+# ==============================================================================
+- name: Deploy fail2ban jail.local configuration
+  template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart fail2ban
+  become: yes
+
+- name: Ensure fail2ban service is started and enabled
+  service:
+    name: fail2ban
+    state: started
+    enabled: yes
+  become: yes

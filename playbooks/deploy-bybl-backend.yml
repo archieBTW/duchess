@@ -1,0 +1,15 @@
+---
+# duchess:name: Deploy bybl Backend (API + gofyrAdmin)
+# duchess:description: Compile Go Linux/amd64 binary, sync backend & secrets, rebuild Docker Compose stack, verify health
+# duchess:category: site-deploy
+
+- name: Deploy bybl Backend Services
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+    - [ "group_vars/all/vault.yml", "group_vars/all/vault.yml.example" ]
+
+  roles:
+    - role: bybl_backend
+      tags: [bybl, bybl_backend, bybl_api, bybl_gofyr, backend]

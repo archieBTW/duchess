@@ -1,0 +1,34 @@
+---
+# duchess:name: Deploy beats.archerwoods.dev (Beats by Arch)
+# duchess:description: Build locally (with cache-busting) and deploy beats.archerwoods.dev, optional Nginx/SSL sync
+# duchess:category: site-deploy
+# duchess:vars: build=true, sync_nginx=false
+
+- name: Deploy beats.archerwoods.dev
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+  vars:
+    build: true
+    sync_nginx: false
+    target_site: "beats"
+
+  roles:
+    - role: nginx
+      tags: [nginx, web]
+      when: sync_nginx | bool
+
+    - role: certbot
+      tags: [certbot, ssl]
+      when: sync_nginx | bool
+
+    - role: static_sites
+      tags: [static_sites, deploy, beats]
+
+  post_tasks:
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
+      when: selected_static_sites | default([]) | length > 0

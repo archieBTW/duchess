@@ -1,0 +1,32 @@
+---
+# duchess:name: Deploy bybl.dev (Full Stack)
+# duchess:description: Build and deploy bybl Go backend (API + gofyrAdmin + Postgres) and Flutter Web frontend
+# duchess:category: site-deploy
+# duchess:vars: build=true
+
+- name: Deploy bybl Backend and Frontend
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+    - [ "group_vars/all/vault.yml", "group_vars/all/vault.yml.example" ]
+  vars:
+    build: true
+    target_site: "bybl_web"
+
+  roles:
+    - role: bybl_backend
+      tags: [bybl, bybl_backend, backend]
+
+    - role: static_sites
+      tags: [bybl, bybl_web, bybl_frontend, frontend, static_sites]
+
+  post_tasks:
+    - name: Reload Nginx to flush cached bybl frontend assets
+      service:
+        name: nginx
+        state: reloaded
+      when:
+        - selected_static_sites is defined
+        - selected_static_sites | length > 0
+      tags: [bybl, bybl_web, bybl_frontend, frontend, static_sites]

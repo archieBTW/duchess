@@ -1,0 +1,20 @@
+# ==============================================================================
+# Strict Default Catch-All Server Block
+# Drops any request with unrecognized Host headers or unknown SNI.
+# Prevents accidental fallback to the first alphabetical virtual host.
+# ==============================================================================
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+

@@ -1,0 +1,14 @@
+---
+# duchess:name: Configure Docker Engine
+# duchess:description: Install and configure Docker Engine and Docker Compose v2
+# duchess:category: server-config
+
+- name: Install and Configure Docker Engine
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+
+  roles:
+    - role: docker
+      tags: [docker]

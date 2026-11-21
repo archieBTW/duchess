@@ -939,7 +939,14 @@ func (m *Model) openRunAutoModal(item models.AutomationItem) {
 	m.runVenvIdx = -1
 
 	if item.Kind == "playbook" {
+		targetHosts := inventory.ResolveTargets(m.inv, defaultTarget)
 		defaultVenv := item.Venv
+		if defaultVenv == "" {
+			defaultVenv = m.wsCfg.MatchPlaybookVenv(item.Path)
+		}
+		if defaultVenv == "" {
+			defaultVenv = m.wsCfg.MatchServerVenv(targetHosts, defaultTarget)
+		}
 		if defaultVenv == "" {
 			defaultVenv = m.wsCfg.AnsibleVenv
 		}
@@ -1299,14 +1306,21 @@ func (m Model) submitModal() (tea.Model, tea.Cmd) {
 			target = "all"
 		}
 		vars := parseVarsString(m.inputs[1].Value())
+		targetHosts := inventory.ResolveTargets(m.inv, target)
+		remoteVenv := m.wsCfg.MatchServerRemoteVenv(targetHosts, target)
+		if remoteVenv == "" {
+			remoteVenv = m.wsCfg.RemoteVenv
+		}
 		pbOpts := runner.PlaybookOptions{
-			ConfigVenv:   m.wsCfg.AnsibleVenv,
-			WorkspaceDir: m.cfg.WorkspaceDir,
-			RemoteVenv:   m.wsCfg.RemoteVenv,
-			CheckMode:    m.runCheckMode,
-			DiffMode:     m.runDiffMode,
-			Become:       m.runBecome,
-			Verbosity:    m.runVerbosity,
+			PlaybookConfigVenv: m.wsCfg.MatchPlaybookVenv(item.Path),
+			ServerConfigVenv:   m.wsCfg.MatchServerVenv(targetHosts, target),
+			ConfigVenv:         m.wsCfg.AnsibleVenv,
+			WorkspaceDir:       m.cfg.WorkspaceDir,
+			RemoteVenv:         remoteVenv,
+			CheckMode:          m.runCheckMode,
+			DiffMode:           m.runDiffMode,
+			Become:             m.runBecome,
+			Verbosity:          m.runVerbosity,
 		}
 		if item.Kind == "playbook" && len(m.inputs) >= 4 {
 			pbOpts.Venv = strings.TrimSpace(m.inputs[2].Value())

@@ -11,6 +11,8 @@ type Host struct {
 	PrivateKey string            `json:"privateKey,omitempty"`
 	Password   string            `json:"password,omitempty"`
 	JumpHost   string            `json:"jumpHost,omitempty"`
+	Venv       string            `json:"venv,omitempty"`
+	RemoteVenv string            `json:"remoteVenv,omitempty"`
 	Groups     []string          `json:"groups"`
 	Vars       map[string]string `json:"vars,omitempty"`
 }

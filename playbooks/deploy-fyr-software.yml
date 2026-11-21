@@ -1,0 +1,24 @@
+---
+# duchess:name: Deploy fyr.software (fyrwebsite)
+# duchess:description: Build locally and deploy fyr.software (Flutter Web), then reload Nginx
+# duchess:category: site-deploy
+# duchess:vars: build=true
+
+- name: Deploy fyr.software
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+  vars:
+    build: true
+    target_site: "fyr_software"
+
+  roles:
+    - role: static_sites
+
+  post_tasks:
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
+      when: selected_static_sites | default([]) | length > 0

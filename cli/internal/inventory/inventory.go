@@ -259,6 +259,12 @@ func applyInheritedVars(inv *models.Inventory) {
 				h.JumpHost = j
 			}
 		}
+		if v := merged["duchess_venv"]; v != "" {
+			h.Venv = v
+		}
+		if v := merged["duchess_remote_venv"]; v != "" {
+			h.RemoteVenv = v
+		}
 		if h.Port == 0 {
 			h.Port = 22
 		}

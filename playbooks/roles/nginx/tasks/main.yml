@@ -1,0 +1,105 @@
+---
+# ==============================================================================
+# Role: nginx
+# Nginx installation, hardened configuration, rate limiting, and virtual hosts
+# ==============================================================================
+
+- name: Install Nginx
+  apt:
+    name: nginx
+    state: present
+    update_cache: yes
+  become: yes
+
+- name: Create ACME webroot directory for Let's Encrypt validation
+  file:
+    path: /var/www/letsencrypt
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+  become: yes
+
+- name: Create web root directories for all static sites
+  file:
+    path: "{{ item.web_root }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+    recurse: yes
+  loop: "{{ hosted_sites }}"
+  when: item.type == 'static'
+  become: yes
+
+- name: Deploy hardened global nginx.conf
+  template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload nginx
+  become: yes
+
+- name: Remove default Nginx site configuration
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: reload nginx
+  become: yes
+
+- name: Deploy strict default server drop block to prevent fallback virtual host leakage
+  template:
+    src: 00-default.conf.j2
+    dest: /etc/nginx/conf.d/00-default.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload nginx
+  become: yes
+
+- name: Check for existing SSL certificate per site
+  stat:
+    path: "/etc/letsencrypt/live/{{ item.domain }}/fullchain.pem"
+  loop: "{{ hosted_sites }}"
+  register: site_ssl_certs
+  become: yes
+
+- name: Deploy virtual host configuration for each site
+  template:
+    src: site.conf.j2
+    dest: "/etc/nginx/sites-available/{{ item.0.name }}.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    vhost: "{{ item.0 }}"
+    cert_stat: "{{ item.1 }}"
+  loop: "{{ hosted_sites | zip(site_ssl_certs.results) | list }}"
+  notify: reload nginx
+  become: yes
+
+- name: Enable virtual host configurations
+  file:
+    src: "/etc/nginx/sites-available/{{ item.name }}.conf"
+    dest: "/etc/nginx/sites-enabled/{{ item.name }}.conf"
+    state: link
+  loop: "{{ hosted_sites }}"
+  notify: reload nginx
+  become: yes
+
+- name: Validate Nginx configuration syntax
+  command: nginx -t
+  changed_when: false
+  become: yes
+
+- name: Ensure Nginx service is running and enabled
+  service:
+    name: nginx
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Flush handlers to ensure Nginx reloads new virtual host configs immediately
+  meta: flush_handlers

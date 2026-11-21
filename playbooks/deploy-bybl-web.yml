@@ -1,0 +1,24 @@
+---
+# duchess:name: Deploy bybl.dev (Frontend Only)
+# duchess:description: Build locally and deploy bybl.dev Flutter Web frontend, then reload Nginx
+# duchess:category: site-deploy
+# duchess:vars: build=true
+
+- name: Deploy bybl.dev Frontend
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+  vars:
+    build: true
+    target_site: "bybl_web"
+
+  roles:
+    - role: static_sites
+
+  post_tasks:
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
+      when: selected_static_sites | default([]) | length > 0

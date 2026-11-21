@@ -1,0 +1,16 @@
+---
+# duchess:name: Configure Base OS & Security
+# duchess:description: Base system packages, 2GB swap, sysctl tuning, UFW firewall lockdown, and Fail2ban
+# duchess:category: server-config
+
+- name: Configure Base System and Firewall Security
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+
+  roles:
+    - role: common
+      tags: [common, base]
+    - role: firewall
+      tags: [firewall, security]

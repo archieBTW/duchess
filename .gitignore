@@ -1,2 +1,5 @@
 # Duchess runtime state and execution history
 .duchess/
+
+# Ansible Vault secrets (never commit real secrets)
+playbooks/group_vars/all/vault.yml

@@ -1,0 +1,23 @@
+---
+# duchess:name: Provision Server (Full Stack Setup)
+# duchess:description: Configure base OS/swap, UFW/Fail2ban, Docker, Nginx vhosts, and Certbot SSL without deploying site builds
+# duchess:category: server-config
+
+- name: Provision Web Server (Base, Firewall, Docker, Nginx, Certbot)
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+    - [ "group_vars/all/vault.yml", "group_vars/all/vault.yml.example" ]
+
+  roles:
+    - role: common
+      tags: [common, base]
+    - role: firewall
+      tags: [firewall, security]
+    - role: docker
+      tags: [docker]
+    - role: nginx
+      tags: [nginx, web]
+    - role: certbot
+      tags: [certbot, ssl]

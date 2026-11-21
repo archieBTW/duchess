@@ -1,0 +1,130 @@
+# ==============================================================================
+# Virtual Host Configuration for {{ vhost.name }} ({{ vhost.domain }})
+# Managed by Ansible - DO NOT EDIT DIRECTLY
+# ==============================================================================
+
+{% set vhost = vhost | default(site if site is mapping else (item.0 if (item is defined and item is sequence) else item)) %}
+{% if cert_stat.stat.exists %}
+# ------------------------------------------------------------------------------
+# HTTP -> HTTPS Redirect Server Block (Active once SSL certificate is issued)
+# ------------------------------------------------------------------------------
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ vhost.domain }}{% for alias in vhost.aliases %} {{ alias }}{% endfor %};
+
+    # ACME Challenge for Certbot renewals
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ------------------------------------------------------------------------------
+# HTTPS Secure Server Block
+# ------------------------------------------------------------------------------
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name {{ vhost.domain }}{% for alias in vhost.aliases %} {{ alias }}{% endfor %};
+
+    ssl_certificate /etc/letsencrypt/live/{{ vhost.domain }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ vhost.domain }}/privkey.pem;
+
+    # Rate Limiting & Connection Hardening
+    limit_req zone={{ vhost.rate_limit_zone }} burst={{ vhost.rate_limit_burst }} nodelay;
+    limit_conn addr_conn {{ nginx_conn_limit }};
+
+{% if vhost.type == 'static' %}
+    root {{ vhost.web_root }};
+    index index.html index.htm;
+
+{% if vhost.custom_nginx_location is defined %}
+{{ vhost.custom_nginx_location }}
+{% endif %}
+
+    # Single Page Application routing (Flutter Web / Vite)
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Ensure HTML entrypoints, service workers, and version manifests are NEVER cached by browsers or CDNs
+    location ~* (index\.html|flutter_service_worker\.js|version\.json)$ {
+        add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0" always;
+        expires -1;
+    }
+
+    # Cache static assets (CanvasKit, JS chunks, fonts, images)
+    location ~* \.(?:css|js|wasm|json|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+    }
+{% elif vhost.type == 'proxy' %}
+    client_max_body_size 50M;
+
+    location / {
+        proxy_pass {{ vhost.proxy_pass }};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+{% endif %}
+}
+{% else %}
+# ------------------------------------------------------------------------------
+# Bootstrap HTTP Server Block (Active prior to first SSL issuance)
+# ------------------------------------------------------------------------------
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ vhost.domain }}{% for alias in vhost.aliases %} {{ alias }}{% endfor %};
+
+    # ACME Challenge for Let's Encrypt validation
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type "text/plain";
+    }
+
+    # Rate Limiting & Connection Hardening
+    limit_req zone={{ vhost.rate_limit_zone }} burst={{ vhost.rate_limit_burst }} nodelay;
+    limit_conn addr_conn {{ nginx_conn_limit }};
+
+{% if vhost.type == 'static' %}
+    root {{ vhost.web_root }};
+    index index.html index.htm;
+
+{% if vhost.custom_nginx_location is defined %}
+{{ vhost.custom_nginx_location }}
+{% endif %}
+
+    # SPA routing
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+{% elif vhost.type == 'proxy' %}
+    client_max_body_size 50M;
+
+    location / {
+        proxy_pass {{ vhost.proxy_pass }};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+{% endif %}
+}
+{% endif %}

@@ -1,0 +1,92 @@
+---
+# ==============================================================================
+# Role: certbot
+# Automated Let's Encrypt SSL certificate issuance and renewal
+# ==============================================================================
+
+- name: Install Certbot and Nginx plugin
+  apt:
+    name:
+      - certbot
+      - python3-certbot-nginx
+    state: present
+    update_cache: yes
+  become: yes
+
+- name: Ensure renewal hooks directory exists
+  file:
+    path: /etc/letsencrypt/renewal-hooks/deploy
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: yes
+
+- name: Deploy post-renewal hook script to reload Nginx
+  copy:
+    dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+    content: |
+      #!/bin/bash
+      systemctl reload nginx
+    owner: root
+    group: root
+    mode: '0755'
+  become: yes
+
+- name: Check which certificates already exist
+  stat:
+    path: "/etc/letsencrypt/live/{{ item.domain }}/fullchain.pem"
+  loop: "{{ hosted_sites }}"
+  register: existing_certs
+  become: yes
+
+- name: Request Let's Encrypt certificates for pending domains
+  shell: >
+    certbot certonly --webroot -w /var/www/letsencrypt
+    --non-interactive --agree-tos
+    --email {{ certbot_admin_email }}
+    -d {{ item.0.domain }}
+    {% for alias in item.0.aliases %} -d {{ alias }}{% endfor %}
+  loop: "{{ hosted_sites | zip(existing_certs.results) | list }}"
+  when: not item.1.stat.exists
+  register: certbot_output
+  failed_when: false
+  become: yes
+
+- name: Log certificate issuance results
+  debug:
+    msg: "Certificate obtained or attempted for {{ item.item.0.domain }}: rc={{ item.rc | default(0) }}"
+  loop: "{{ certbot_output.results | default([]) }}"
+  when: item.skipped is not defined and item.cmd is defined
+
+# Re-check certificates after certbot issuance
+- name: Re-check certificates after certbot run
+  stat:
+    path: "/etc/letsencrypt/live/{{ item.domain }}/fullchain.pem"
+  loop: "{{ hosted_sites }}"
+  register: post_certs
+  become: yes
+
+- name: Update Nginx virtual hosts with active SSL configurations
+  template:
+    src: "{{ playbook_dir }}/roles/nginx/templates/site.conf.j2"
+    dest: "/etc/nginx/sites-available/{{ item.0.name }}.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    vhost: "{{ item.0 }}"
+    cert_stat: "{{ item.1 }}"
+  loop: "{{ hosted_sites | zip(post_certs.results) | list }}"
+  notify: reload nginx
+  become: yes
+
+- name: Ensure certbot renewal timer is running and enabled
+  service:
+    name: certbot.timer
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Flush handlers to ensure Nginx reloads SSL configurations immediately
+  meta: flush_handlers

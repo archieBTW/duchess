@@ -43,58 +43,89 @@ func VenvAnsibleBinary(venvDir string) string {
 // Precedence:
 //  1. explicitVenv (--venv flag or TUI input)
 //  2. itemVenv (# duchess:venv: header in playbook)
-//  3. configVenv (duchess.yml ansible_venv or DUCHESS_ANSIBLE_VENV)
-//  4. active $VIRTUAL_ENV (only if it contains bin/ansible-playbook)
-//  5. workspace .venv / venv (only if it contains bin/ansible-playbook)
+//  3. playbookConfigVenv (playbook_venvs match in duchess.yml)
+//  4. serverConfigVenv (duchess_venv inventory var or server_venvs match in duchess.yml)
+//  5. configVenv (global ansible_venv in duchess.yml or DUCHESS_ANSIBLE_VENV)
+//  6. active $VIRTUAL_ENV (only if it contains bin/ansible-playbook)
+//  7. workspace .venv / venv (only if it contains bin/ansible-playbook)
 //
-// If an explicit/item/config venv is specified and does not contain bin/ansible-playbook,
+// If an explicit/pinned/configured venv does not contain bin/ansible-playbook,
 // an explicit error is returned so Duchess never silently falls back to a different environment.
 func ResolvePlaybookVenv(explicitVenv, itemVenv, configVenv, workspaceDir string) (venvPath, binPath string, isExplicit bool, err error) {
-	checkRequired := func(raw, source string) (string, string, error) {
-		resolved := ExpandVenvPath(raw, workspaceDir)
+	v, b, isExp, _, e := ResolvePlaybookVenvLayered(VenvLookup{
+		ExplicitVenv: explicitVenv,
+		ItemVenv:     itemVenv,
+		ConfigVenv:   configVenv,
+		WorkspaceDir: workspaceDir,
+	})
+	return v, b, isExp, e
+}
+
+// VenvLookup holds all layered sources for resolving a controller virtualenv.
+type VenvLookup struct {
+	ExplicitVenv       string
+	ItemVenv           string
+	PlaybookConfigVenv string
+	ServerConfigVenv   string
+	ConfigVenv         string
+	WorkspaceDir       string
+}
+
+// ResolvePlaybookVenvLayered resolves the controller venv across all priority layers
+// and returns (venvPath, binPath, isExplicit, sourceLabel, err).
+func ResolvePlaybookVenvLayered(in VenvLookup) (venvPath, binPath string, isExplicit bool, source string, err error) {
+	checkRequired := func(raw, srcLabel string) (string, string, error) {
+		resolved := ExpandVenvPath(raw, in.WorkspaceDir)
 		bin := VenvAnsibleBinary(resolved)
 		st, statErr := os.Stat(bin)
 		if statErr != nil {
-			return "", "", fmt.Errorf("%s venv %q does not contain ansible-playbook at %s (%v)", source, raw, bin, statErr)
+			return "", "", fmt.Errorf("%s venv %q does not contain ansible-playbook at %s (%v)", srcLabel, raw, bin, statErr)
 		}
 		if st.IsDir() {
-			return "", "", fmt.Errorf("%s venv %q has a directory at %s instead of an executable", source, raw, bin)
+			return "", "", fmt.Errorf("%s venv %q has a directory at %s instead of an executable", srcLabel, raw, bin)
 		}
 		return resolved, bin, nil
 	}
 
-	if strings.TrimSpace(explicitVenv) != "" {
-		v, b, e := checkRequired(explicitVenv, "specified")
-		return v, b, true, e
+	requiredLayers := []struct {
+		val   string
+		label string
+	}{
+		{in.ExplicitVenv, "specified"},
+		{in.ItemVenv, "playbook header (# duchess:venv:)"},
+		{in.PlaybookConfigVenv, "playbook_venvs (duchess.yml)"},
+		{in.ServerConfigVenv, "server_venvs / inventory (duchess_venv)"},
+		{in.ConfigVenv, "workspace config (ansible_venv)"},
 	}
-	if strings.TrimSpace(itemVenv) != "" {
-		v, b, e := checkRequired(itemVenv, "playbook header (# duchess:venv:)")
-		return v, b, true, e
-	}
-	if strings.TrimSpace(configVenv) != "" {
-		v, b, e := checkRequired(configVenv, "workspace config")
-		return v, b, true, e
+	for _, layer := range requiredLayers {
+		if strings.TrimSpace(layer.val) != "" {
+			v, b, e := checkRequired(layer.val, layer.label)
+			return v, b, true, layer.label, e
+		}
 	}
 
 	// Soft auto-detection: active $VIRTUAL_ENV, then workspace .venv / venv
-	var softCandidates []string
-	if active := strings.TrimSpace(os.Getenv("VIRTUAL_ENV")); active != "" {
-		softCandidates = append(softCandidates, active)
+	var softCandidates []struct {
+		path  string
+		label string
 	}
-	if workspaceDir != "" {
+	if active := strings.TrimSpace(os.Getenv("VIRTUAL_ENV")); active != "" {
+		softCandidates = append(softCandidates, struct{ path, label string }{active, "active $VIRTUAL_ENV"})
+	}
+	if in.WorkspaceDir != "" {
 		softCandidates = append(softCandidates,
-			filepath.Join(workspaceDir, ".venv"),
-			filepath.Join(workspaceDir, "venv"),
+			struct{ path, label string }{filepath.Join(in.WorkspaceDir, ".venv"), "workspace .venv"},
+			struct{ path, label string }{filepath.Join(in.WorkspaceDir, "venv"), "workspace venv"},
 		)
 	}
 	for _, c := range softCandidates {
-		resolved := ExpandVenvPath(c, workspaceDir)
+		resolved := ExpandVenvPath(c.path, in.WorkspaceDir)
 		bin := VenvAnsibleBinary(resolved)
 		if st, err := os.Stat(bin); err == nil && !st.IsDir() {
-			return resolved, bin, false, nil
+			return resolved, bin, false, c.label, nil
 		}
 	}
-	return "", "", false, nil
+	return "", "", false, "", nil
 }
 
 // BuildVenvEnv returns a process environment configured to activate venvPath

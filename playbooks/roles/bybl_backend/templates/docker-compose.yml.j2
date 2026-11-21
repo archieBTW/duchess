@@ -1,0 +1,50 @@
+# ==============================================================================
+# bybl Backend Docker Compose
+# - Database (PostgreSQL) is isolated in app-network with NO host port exposure.
+# - API & gofyrAdmin bind strictly to localhost (127.0.0.1) for Nginx reverse proxy.
+# ==============================================================================
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: bybl-db
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Accessible ONLY via internal app-network by bybl-api (which hosts API & gofyr)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ vault_postgres_user | default('bybl_user') }} -d {{ vault_postgres_db | default('bybl_db') }}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app-network
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: Backend/Dockerfile
+    container_name: bybl-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+    # Bind exclusively to 127.0.0.1 (localhost) to guarantee zero direct public exposure
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - ./Backend/uploads:/app/uploads
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  db-data:

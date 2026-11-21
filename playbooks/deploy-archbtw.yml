@@ -1,0 +1,24 @@
+---
+# duchess:name: Deploy archbtw.sh
+# duchess:description: Build locally and deploy archbtw.sh (Flutter Web), then reload Nginx
+# duchess:category: site-deploy
+# duchess:vars: build=true
+
+- name: Deploy archbtw.sh
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  vars_files:
+    - "group_vars/all/vars.yml"
+  vars:
+    build: true
+    target_site: "archbtw"
+
+  roles:
+    - role: static_sites
+
+  post_tasks:
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
+      when: selected_static_sites | default([]) | length > 0
