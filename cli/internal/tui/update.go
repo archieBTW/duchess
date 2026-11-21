@@ -35,6 +35,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			return m.handleScrollDelta(-3), nil
+		case tea.MouseButtonWheelDown:
+			return m.handleScrollDelta(3), nil
+		}
+		return m, nil
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
@@ -166,6 +175,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if msg.entry.Kind == "playbook" || msg.entry.Kind == "script" {
 			copyEntry := msg.entry
 			m.lastAutoLog = &copyEntry
+			// Auto-scroll to bottom so errors & PLAY RECAP are immediately visible
+			m.autoOutputScroll = 1 << 20
 		}
 		if msg.openModal {
 			body := strings.TrimSpace(msg.entry.Stdout)
@@ -782,12 +793,24 @@ func (m Model) updateAutomation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.autoCursor++
 			m.autoSourceScroll = 0
 		}
-	case "pgup", "[":
+	case "pgup":
+		m.autoOutputScroll = m.scrollClamped(m.autoOutputScroll, m.autoOutputMaxOff(), -5)
+	case "pgdown":
+		m.autoOutputScroll = m.scrollClamped(m.autoOutputScroll, m.autoOutputMaxOff(), 5)
+	case "K":
+		m.autoOutputScroll = m.scrollClamped(m.autoOutputScroll, m.autoOutputMaxOff(), -3)
+	case "J":
+		m.autoOutputScroll = m.scrollClamped(m.autoOutputScroll, m.autoOutputMaxOff(), 3)
+	case "[":
 		if m.autoSourceScroll > 0 {
 			m.autoSourceScroll = maxInt(0, m.autoSourceScroll-4)
 		}
-	case "pgdown", "]":
+	case "]":
 		m.autoSourceScroll += 4
+	case "o", " ":
+		if m.lastAutoLog != nil {
+			m.openExecOutputModal(*m.lastAutoLog)
+		}
 	case "f":
 		switch m.autoFilter {
 		case "all":
@@ -841,10 +864,22 @@ func (m Model) updateLogs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.logCursor++
 			m.logScroll = 0
 		}
-	case "pgup", "[":
-		m.logScroll = maxInt(0, m.logScroll-5)
-	case "pgdown", "]":
-		m.logScroll += 5
+	case "pgup", "[", "K", "u":
+		m.logScroll = m.scrollClamped(m.logScroll, m.logOutputMaxOff(), -8)
+	case "pgdown", "]", "J", "d":
+		m.logScroll = m.scrollClamped(m.logScroll, m.logOutputMaxOff(), 8)
+	case "g":
+		m.logScroll = 0
+	case "G":
+		m.logScroll = m.logOutputMaxOff()
+	case "enter", "o", " ":
+		if len(logs) > 0 {
+			idx := m.logCursor
+			if idx < 0 || idx >= len(logs) {
+				idx = 0
+			}
+			m.openExecOutputModal(logs[idx])
+		}
 	case "f":
 		order := []string{"all", "failed", "playbook", "script", "ops", "ssh"}
 		next := "all"
@@ -859,6 +894,94 @@ func (m Model) updateLogs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.logScroll = 0
 	}
 	return m, nil
+}
+
+func (m *Model) openExecOutputModal(e ExecLogEntry) {
+	body := formatExecLogBody(e)
+	m.outputTitle = fmt.Sprintf("%s — %s (%s • exit %d • %dms)", e.Title, e.Target, e.Engine, e.ExitCode, e.DurationMs)
+	m.outputBody = body
+	m.outputScroll = 0
+	if !e.Succeeded() {
+		// Jump near the bottom on failures so the error is immediately visible
+		m.outputScroll = 1 << 20
+	}
+	m.modal = modalOutput
+}
+
+func (m Model) handleScrollDelta(delta int) Model {
+	if m.modal == modalOutput {
+		m.outputScroll = m.scrollClamped(m.outputScroll, m.modalOutputMaxOff(), delta)
+		return m
+	}
+	switch m.activeTab {
+	case tabAutomation:
+		m.autoOutputScroll = m.scrollClamped(m.autoOutputScroll, m.autoOutputMaxOff(), delta)
+	case tabLogs:
+		m.logScroll = m.scrollClamped(m.logScroll, m.logOutputMaxOff(), delta)
+	case tabInspector:
+		if m.inspectorSub == subAdHocSSH {
+			m.inspectorScroll = maxInt(0, m.inspectorScroll+delta)
+		}
+	}
+	return m
+}
+
+func (m Model) scrollClamped(cur, maxOff, delta int) int {
+	if cur > maxOff {
+		cur = maxOff
+	}
+	if cur < 0 {
+		cur = 0
+	}
+	next := cur + delta
+	if next < 0 {
+		return 0
+	}
+	if next > maxOff {
+		return maxOff
+	}
+	return next
+}
+
+func (m Model) autoOutputMaxOff() int {
+	if m.lastAutoLog == nil {
+		return 0
+	}
+	leftBoxW := maxInt(28, m.width/3)
+	rightBoxW := maxInt(30, m.width-leftBoxW-5)
+	rightInnerW := maxInt(26, rightBoxW-2)
+	bodyH := maxInt(8, m.height-10)
+	innerH := maxInt(6, bodyH-2)
+	srcH := maxInt(3, (innerH-5)/2)
+	outH := maxInt(1, innerH-5-srcH)
+	lines := wrapTextLines(formatExecLogBody(*m.lastAutoLog), rightInnerW)
+	return maxInt(0, len(lines)-outH)
+}
+
+func (m Model) logOutputMaxOff() int {
+	logs := m.filteredLogs()
+	if len(logs) == 0 {
+		return 0
+	}
+	idx := m.logCursor
+	if idx < 0 || idx >= len(logs) {
+		idx = 0
+	}
+	leftBoxW := maxInt(30, m.width/3)
+	rightBoxW := maxInt(30, m.width-leftBoxW-5)
+	rightInnerW := maxInt(26, rightBoxW-2)
+	bodyH := maxInt(8, m.height-10)
+	innerH := maxInt(6, bodyH-2)
+	viewH := maxInt(2, innerH-3)
+	lines := wrapTextLines(formatExecLogBody(logs[idx]), rightInnerW)
+	return maxInt(0, len(lines)-viewH)
+}
+
+func (m Model) modalOutputMaxOff() int {
+	w := minInt(108, m.width-4)
+	h := maxInt(8, m.height-10)
+	lines := wrapTextLines(m.outputBody, maxInt(20, w-6))
+	return maxInt(0, len(lines)-h)
 }
 
 // ==================== Modal Builders & Handlers ====================
@@ -1014,15 +1137,17 @@ func (m Model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.modal == modalOutput {
 		switch key {
 		case "up", "k":
-			if m.outputScroll > 0 {
-				m.outputScroll--
-			}
+			m.outputScroll = m.scrollClamped(m.outputScroll, m.modalOutputMaxOff(), -1)
 		case "down", "j":
-			m.outputScroll++
-		case "pgup":
-			m.outputScroll = maxInt(0, m.outputScroll-10)
-		case "pgdown":
-			m.outputScroll += 10
+			m.outputScroll = m.scrollClamped(m.outputScroll, m.modalOutputMaxOff(), 1)
+		case "pgup", "u":
+			m.outputScroll = m.scrollClamped(m.outputScroll, m.modalOutputMaxOff(), -12)
+		case "pgdown", "d":
+			m.outputScroll = m.scrollClamped(m.outputScroll, m.modalOutputMaxOff(), 12)
+		case "g":
+			m.outputScroll = 0
+		case "G":
+			m.outputScroll = m.modalOutputMaxOff()
 		case "enter", "q":
 			m.modal = modalNone
 		}

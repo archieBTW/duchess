@@ -173,3 +173,19 @@ func TestBuildVenvEnv(t *testing.T) {
 		t.Fatalf("expected venv bin prepended to PATH, got %q", gotPath)
 	}
 }
+
+func TestBuiltinSSHEngineRejectsRolePlaybooksLoudly(t *testing.T) {
+	ws := t.TempDir()
+	pb := filepath.Join(ws, "deploy-fyr.yml")
+	content := "---\n- name: Deploy fyr.software\n  hosts: all\n  vars_files:\n    - group_vars/all/vars.yml\n  roles:\n    - role: static_sites\n"
+	if err := os.WriteFile(pb, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	results, err := runWithBuiltinSSHEngine(context.Background(), pb, nil, nil, PlaybookOptions{}, sshclient.Options{})
+	if err != nil {
+		t.Fatalf("unexpected hard error: %v", err)
+	}
+	if len(results) != 1 || results[0].ExitCode == 0 || !strings.Contains(results[0].Stdout, "requires") && !strings.Contains(results[0].Error, "ansible-playbook") {
+		t.Fatalf("expected non-zero error explaining real ansible-playbook is required, got: %+v", results)
+	}
+}

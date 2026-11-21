@@ -1,0 +1,18 @@
+# Duchess Workspace Configuration
+ansible_venv: /home/archer/.venvs/ansible
+poll_interval_seconds: 10
+ssh:
+    user: ""
+    port: 0
+    private_key: ""
+    jump_host: ""
+    use_ssh_config: true
+    strict_host_key: false
+    known_hosts_path: ""
+alerts:
+    disk_warn_pct: 85
+    disk_crit_pct: 95
+    mem_warn_pct: 90
+    cpu_warn_pct: 90
+    load_factor: 1.5
+    cert_warn_days: 14

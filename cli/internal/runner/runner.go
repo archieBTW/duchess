@@ -319,17 +319,34 @@ func runWithAnsibleBinary(
 	pbOpts PlaybookOptions,
 	sshOpts sshclient.Options,
 ) ([]models.ExecutionResult, error) {
-	args := BuildAnsibleArgs(inventoryPath, playbookPath, limit, extraVars, pbOpts, sshOpts)
+	// If session credentials unlock a local passphrase-protected SSH private key,
+	// serve the decrypted key via an ephemeral in-memory Go ssh-agent so OpenSSH
+	// (used by ansible-playbook and synchronize/rsync) authenticates seamlessly
+	// even under BatchMode=yes without writing secrets to disk or argv.
+	agentSock, usedSessionPassForKey, cleanupAgent, _ := sshclient.StartEphemeralAgent(sshOpts)
+	defer cleanupAgent()
+
+	ansibleSSHOpts := sshOpts
+	if usedSessionPassForKey {
+		// Session password was a private-key passphrase, not an SSH login password;
+		// avoid passing -e ansible_password=... which triggers sshpass instead of publickey auth.
+		ansibleSSHOpts.Password = ""
+	}
+
+	args := BuildAnsibleArgs(inventoryPath, playbookPath, limit, extraVars, pbOpts, ansibleSSHOpts)
 
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	env := BuildVenvEnv(os.Environ(), venvPath)
+	if agentSock != "" {
+		env = setEnvVar(env, "SSH_AUTH_SOCK", agentSock)
+	}
 	// Auto-load ansible.cfg placed alongside the playbook (e.g. playbooks/ansible.cfg)
 	if os.Getenv("ANSIBLE_CONFIG") == "" {
 		if absPb, err := filepath.Abs(playbookPath); err == nil {
 			cfgCandidate := filepath.Join(filepath.Dir(absPb), "ansible.cfg")
 			if st, err := os.Stat(cfgCandidate); err == nil && !st.IsDir() {
-				env = append(env, "ANSIBLE_CONFIG="+cfgCandidate)
+				env = setEnvVar(env, "ANSIBLE_CONFIG", cfgCandidate)
 			}
 		}
 	}
@@ -425,11 +442,39 @@ func readPipeLines(r io.Reader, buf *bytes.Buffer, emit func(string)) {
 }
 
 type ansiblePlay struct {
-	Name   string           `yaml:"name"`
-	Hosts  string           `yaml:"hosts"`
-	Become bool             `yaml:"become"`
-	Vars   map[string]any   `yaml:"vars"`
-	Tasks  []map[string]any `yaml:"tasks"`
+	Name           string           `yaml:"name"`
+	Hosts          string           `yaml:"hosts"`
+	Become         bool             `yaml:"become"`
+	Vars           map[string]any   `yaml:"vars"`
+	VarsFiles      []any            `yaml:"vars_files"`
+	Roles          []any            `yaml:"roles"`
+	PreTasks       []map[string]any `yaml:"pre_tasks"`
+	Tasks          []map[string]any `yaml:"tasks"`
+	PostTasks      []map[string]any `yaml:"post_tasks"`
+	ImportPlaybook string           `yaml:"import_playbook"`
+}
+
+func detectFullAnsibleRequirements(plays []ansiblePlay) []string {
+	seen := make(map[string]bool)
+	var reqs []string
+	add := func(label string) {
+		if !seen[label] {
+			seen[label] = true
+			reqs = append(reqs, label)
+		}
+	}
+	for _, p := range plays {
+		if len(p.Roles) > 0 {
+			add("roles")
+		}
+		if len(p.VarsFiles) > 0 {
+			add("vars_files")
+		}
+		if p.ImportPlaybook != "" {
+			add("import_playbook")
+		}
+	}
+	return reqs
 }
 
 func runWithBuiltinSSHEngine(ctx context.Context, playbookPath string, hosts []*models.Host, extraVars map[string]string, pbOpts PlaybookOptions, opts sshclient.Options) ([]models.ExecutionResult, error) {
@@ -440,6 +485,30 @@ func runWithBuiltinSSHEngine(ctx context.Context, playbookPath string, hosts []*
 	var plays []ansiblePlay
 	if err := yaml.Unmarshal(data, &plays); err != nil {
 		return nil, fmt.Errorf("parse playbook YAML: %w", err)
+	}
+
+	if reqs := detectFullAnsibleRequirements(plays); len(reqs) > 0 {
+		msg := fmt.Sprintf(
+			"ansible-playbook was not found on PATH or in a configured venv, and %s uses full Ansible features (%s) that the built-in lightweight SSH runner cannot execute.\n"+
+				"Install Ansible in a venv and pin it:\n"+
+				"  python3 -m venv ~/.venvs/ansible && ~/.venvs/ansible/bin/pip install ansible\n"+
+				"  duchess venv pin ~/.venvs/ansible --default\n"+
+				"Or enter an existing venv path in the Run Playbook modal / --venv flag.",
+			filepath.Base(playbookPath),
+			strings.Join(reqs, ", "),
+		)
+		if pbOpts.OnOutput != nil {
+			for _, ln := range strings.Split(msg, "\n") {
+				pbOpts.OnOutput(ln)
+			}
+		}
+		return []models.ExecutionResult{{
+			HostName: limitOrAll(""),
+			ExitCode: 1,
+			Stdout:   msg + "\n",
+			Engine:   "duchess-ssh-playbook",
+			Error:    fmt.Sprintf("requires real ansible-playbook (%s)", strings.Join(reqs, ", ")),
+		}}, nil
 	}
 
 	results := make([]models.ExecutionResult, len(hosts))
@@ -495,7 +564,12 @@ func runWithBuiltinSSHEngine(ctx context.Context, playbookPath string, hosts []*
 				}
 				registered := make(map[string]string)
 
-				for _, task := range play.Tasks {
+				allTasks := make([]map[string]any, 0, len(play.PreTasks)+len(play.Tasks)+len(play.PostTasks))
+				allTasks = append(allTasks, play.PreTasks...)
+				allTasks = append(allTasks, play.Tasks...)
+				allTasks = append(allTasks, play.PostTasks...)
+
+				for _, task := range allTasks {
 					tName, _ := task["name"].(string)
 					if tName == "" {
 						tName = "Unnamed task"
@@ -636,4 +710,16 @@ func limitOrAll(limit string) string {
 		return "all"
 	}
 	return limit
+}
+
+func setEnvVar(env []string, key, val string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, prefix+val)
 }

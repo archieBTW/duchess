@@ -803,16 +803,15 @@ func (m Model) viewAutomation(bodyH int) string {
 			if !e.Succeeded() {
 				col = colorRose
 			}
-			var outLines []string
-			outLines = append(outLines, clampLine(badge(fmt.Sprintf("LAST RUN: %s EXIT %d (%dms)", e.Engine, e.ExitCode, e.DurationMs), col), rightInnerW))
-			outText := strings.TrimSpace(e.Stdout)
-			if e.Error != "" {
-				outText += "\nERROR: " + e.Error
-			}
-			for _, ln := range strings.Split(outText, "\n") {
-				outLines = append(outLines, clampLine(ln, rightInnerW))
-			}
-			rightLines = append(rightLines, sliceVisibleLines(outLines, 0, outH))
+			head := clampLine(
+				badge(fmt.Sprintf("LAST RUN: %s EXIT %d (%dms)", e.Engine, e.ExitCode, e.DurationMs), col)+
+					"  "+styleMuted.Render("[J/K/PgDn] Scroll  [o] Fullscreen"),
+				rightInnerW,
+			)
+			wrapped := wrapTextLines(formatExecLogBody(*e), rightInnerW)
+			bodyHOut := maxInt(1, outH-1)
+			rightLines = append(rightLines, head)
+			rightLines = append(rightLines, sliceVisibleLines(wrapped, m.autoOutputScroll, bodyHOut))
 		} else {
 			rightLines = append(rightLines, clampLine(styleMuted.Render("Press [Enter] or [x] to run this "+item.Kind+" (supports --venv, --check, --diff, --tags, live streaming)."), rightInnerW))
 		}
@@ -877,26 +876,26 @@ func (m Model) viewLogs(bodyH int) string {
 	if !e.Succeeded() {
 		col = colorRose
 	}
-	body := strings.TrimSpace(e.Stdout)
-	if strings.TrimSpace(e.Stderr) != "" {
-		body += "\n--- STDERR ---\n" + strings.TrimSpace(e.Stderr)
+	bodyLines := wrapTextLines(formatExecLogBody(e), rightInnerW)
+	viewH := maxInt(2, innerH-3)
+	maxOff := maxInt(0, len(bodyLines)-viewH)
+	effOff := m.logScroll
+	if effOff > maxOff {
+		effOff = maxOff
 	}
-	if e.Error != "" {
-		body += "\n--- ERROR ---\n" + e.Error
+	if effOff < 0 {
+		effOff = 0
 	}
-	var bodyLines []string
-	for _, ln := range strings.Split(body, "\n") {
-		bodyLines = append(bodyLines, clampLine(ln, rightInnerW))
-	}
-	meta := fmt.Sprintf("Target: %s • Engine: %s • %dms • %s", e.Target, e.Engine, e.DurationMs, e.Timestamp.Format("2006-01-02 15:04:05"))
+	meta := fmt.Sprintf("Target: %s • %s • %dms • %s", e.Target, e.Engine, e.DurationMs, e.Timestamp.Format("15:04:05"))
 	if e.Venv != "" {
 		meta += " • Venv: " + e.Venv
 	}
+	scrollInfo := fmt.Sprintf("[J/K/PgDn] Scroll (%d/%d)  [Enter] Fullscreen", minInt(len(bodyLines), effOff+viewH), len(bodyLines))
 	rightLines := []string{
-		clampLine(badge(fmt.Sprintf("EXIT %d", e.ExitCode), col)+" "+lipgloss.NewStyle().Bold(true).Render(e.Title), rightInnerW),
+		clampLine(badge(fmt.Sprintf("EXIT %d", e.ExitCode), col)+" "+lipgloss.NewStyle().Bold(true).Render(e.Title)+"  "+styleMuted.Render(scrollInfo), rightInnerW),
 		clampLine(styleSubtitle.Render(meta), rightInnerW),
 		styleMuted.Render(strings.Repeat("─", rightInnerW)),
-		sliceVisibleLines(bodyLines, m.logScroll, maxInt(2, innerH-3)),
+		sliceVisibleLines(bodyLines, effOff, viewH),
 	}
 	rightPane := styleBox.Width(rightBoxW).Height(innerH).MaxHeight(bodyH).Render(strings.Join(rightLines, "\n"))
 
@@ -965,18 +964,24 @@ func (m Model) viewModal() string {
 		}, "\n"))
 
 	case modalOutput:
-		w := minInt(96, m.width-6)
+		w := minInt(108, m.width-4)
 		h := maxInt(8, m.height-10)
-		var lines []string
-		for _, ln := range strings.Split(m.outputBody, "\n") {
-			lines = append(lines, clampLine(ln, w-6))
+		lines := wrapTextLines(m.outputBody, maxInt(20, w-6))
+		maxOff := maxInt(0, len(lines)-h)
+		effOff := m.outputScroll
+		if effOff > maxOff {
+			effOff = maxOff
 		}
+		if effOff < 0 {
+			effOff = 0
+		}
+		rangeLabel := fmt.Sprintf("Lines %d-%d of %d", minInt(len(lines), effOff+1), minInt(len(lines), effOff+h), len(lines))
 		return styleModal.Width(w).Render(strings.Join([]string{
 			clampLine(styleTitle.Render(m.outputTitle), w-6),
 			styleMuted.Render(strings.Repeat("─", maxInt(20, w-6))),
-			sliceVisibleLines(lines, m.outputScroll, h),
+			sliceVisibleLines(lines, effOff, h),
 			"",
-			styleMuted.Render("[↑/↓ / PgUp/PgDn] Scroll  [Enter / Esc / q] Close"),
+			clampLine(styleMuted.Render(rangeLabel+"  •  [↑/↓/j/k/PgUp/PgDn/g/G/Wheel] Scroll  [Enter/Esc/q] Close"), w-6),
 		}, "\n"))
 
 	case modalRunAuto:
@@ -1125,4 +1130,46 @@ func sliceVisibleLines(lines []string, offset, height int) string {
 	}
 	end := minInt(len(lines), offset+height)
 	return strings.Join(lines[offset:end], "\n")
+}
+
+func formatExecLogBody(e ExecLogEntry) string {
+	body := strings.TrimSpace(e.Stdout)
+	if strings.TrimSpace(e.Stderr) != "" {
+		if body != "" {
+			body += "\n--- STDERR ---\n"
+		}
+		body += strings.TrimSpace(e.Stderr)
+	}
+	if e.Error != "" {
+		if body != "" {
+			body += "\n--- ERROR ---\n"
+		}
+		body += e.Error
+	}
+	if body == "" {
+		return "(no output)"
+	}
+	return body
+}
+
+// wrapTextLines wraps long output lines cleanly to width cells so verbose
+// Ansible JSON error messages are fully readable without horizontal truncation.
+func wrapTextLines(text string, width int) []string {
+	if width <= 4 {
+		width = 20
+	}
+	var out []string
+	for _, raw := range strings.Split(strings.ReplaceAll(text, "\r", ""), "\n") {
+		if raw == "" {
+			out = append(out, "")
+			continue
+		}
+		runes := []rune(raw)
+		for len(runes) > width {
+			out = append(out, string(runes[:width]))
+			runes = runes[width:]
+		}
+		out = append(out, string(runes))
+	}
+	return out
 }

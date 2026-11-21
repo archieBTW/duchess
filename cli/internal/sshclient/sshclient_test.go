@@ -176,3 +176,46 @@ func TestConnectTriesAllPublicKeysAndPassphraseFallback(t *testing.T) {
 	}
 	_ = client.Close()
 }
+
+func TestStartEphemeralAgentServesDecryptedKeyOverSSHAuthSock(t *testing.T) {
+	dir := t.TempDir()
+	encPEM, encPub := generateTestKeyPair(t, "my-key-pass")
+	keyPath := filepath.Join(dir, "id_ed25519")
+	if err := os.WriteFile(keyPath, encPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sock, usedPass, cleanup, err := StartEphemeralAgent(Options{
+		PrivateKey: keyPath,
+		Password:   "my-key-pass",
+	})
+	if err != nil {
+		t.Fatalf("StartEphemeralAgent failed: %v", err)
+	}
+	defer cleanup()
+	if sock == "" || !usedPass {
+		t.Fatalf("expected ephemeral agent socket and usedPass=true, got sock=%q usedPass=%v", sock, usedPass)
+	}
+
+	ip, port, stop := startTestSSHServer(t, encPub)
+	defer stop()
+
+	// Authenticate using ONLY SSH_AUTH_SOCK (simulating ansible-playbook / OpenSSH BatchMode)
+	t.Setenv("SSH_AUTH_SOCK", sock)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	client, err := Connect(ctx, &models.Host{
+		Name:    "agent-test",
+		Address: ip,
+		User:    "tester",
+		Port:    port,
+	}, Options{
+		SSHConfigPath: "none",
+		Timeout:       3 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("expected SSH connection via ephemeral SSH_AUTH_SOCK to succeed, got: %v", err)
+	}
+	_ = client.Close()
+}

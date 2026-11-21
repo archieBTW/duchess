@@ -173,6 +173,8 @@ func DiscoverVenvs(workspaceDir string) []VenvInfo {
 		candidates = append(candidates,
 			filepath.Join(workspaceDir, ".venv"),
 			filepath.Join(workspaceDir, "venv"),
+			filepath.Join(filepath.Dir(workspaceDir), ".venv"),
+			filepath.Join(filepath.Dir(workspaceDir), "WE-IAC", ".venv"),
 		)
 	}
 	if home, err := os.UserHomeDir(); err == nil {
@@ -182,8 +184,11 @@ func DiscoverVenvs(workspaceDir string) []VenvInfo {
 		)
 		for _, parent := range []string{
 			filepath.Join(home, "venvs"),
+			filepath.Join(home, ".venvs"),
 			filepath.Join(home, ".virtualenvs"),
 			filepath.Join(home, ".local", "share", "virtualenvs"),
+			filepath.Join(home, ".local", "pipx", "venvs"),
+			filepath.Join(home, ".pyenv", "versions"),
 		} {
 			entries, err := os.ReadDir(parent)
 			if err != nil {

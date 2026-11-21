@@ -150,6 +150,7 @@ type Model struct {
 	inspectorRow     int
 	inspectorScroll  int
 	autoSourceScroll int
+	autoOutputScroll int
 	logCursor        int
 	logScroll        int
 	searchActive     bool
@@ -327,7 +328,7 @@ func (m Model) effectiveJump(h *models.Host) string {
 func Run(cfg Config) error {
 	m := NewModel(cfg)
 	defer m.sshPool.CloseAll()
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
