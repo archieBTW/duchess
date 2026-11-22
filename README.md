@@ -37,9 +37,23 @@ duchess/
 
 ---
 
-## Quick Start
+## Installation (Recommended)
 
-Build the binary:
+Run the installer to compile `duchess`, add it to your `PATH` (`~/.local/bin/duchess`), and install playbooks, scripts, inventory, and `duchess.yml` into `~/.duchess/`:
+
+```bash
+./install.sh
+```
+
+Once installed, run `duchess` from **any directory**—Duchess automatically falls back to `~/.duchess` when no local workspace is found (and re-running `./install.sh` safely upgrades the binary, playbooks, and scripts without overwriting your existing `~/.duchess/duchess.yml`, `~/.duchess/inventory/hosts.ini`, or `vault.yml`).
+
+Installer options:
+- `./install.sh --system` — install binary to `/usr/local/bin`
+- `./install.sh --bin-dir <dir> --home-dir <dir>` — customize install locations
+- `./install.sh --force` — also overwrite existing `duchess.yml` and inventory files
+- `./uninstall.sh` (add `--purge` to also remove `~/.duchess`)
+
+## Build Manually
 
 ```bash
 cd cli
@@ -49,9 +63,9 @@ go build -o bin/duchess .
 ### Interactive ASCII TUI Dashboard (Default)
 
 ```bash
-./bin/duchess
+duchess
 # or pass SSH user/key/jump/venv directly to skip the launch prompt:
-./bin/duchess -u ubuntu -k ~/.ssh/id_ed25519 -J bastion.internal --venv ~/venvs/ansible
+duchess -u ubuntu -k ~/.ssh/id_ed25519 -J bastion.internal --venv ~/venvs/ansible
 ```
 
 **TUI Views & Keybindings:**

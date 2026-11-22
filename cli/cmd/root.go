@@ -72,30 +72,57 @@ func init() {
 
 func resolveWorkspace() string {
 	if flagWorkspace != "" {
-		return flagWorkspace
+		return inventory.ExpandHome(flagWorkspace)
+	}
+	if envWS := strings.TrimSpace(os.Getenv("DUCHESS_WORKSPACE")); envWS != "" {
+		return inventory.ExpandHome(envWS)
 	}
 	cwd, err := os.Getwd()
+	if err == nil {
+		dir := cwd
+		for i := 0; i < 6; i++ {
+			if isWorkspaceDir(dir) {
+				return dir
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	if homeWS := defaultHomeWorkspace(); homeWS != "" && isWorkspaceDir(homeWS) {
+		return homeWS
+	}
+	if cwd != "" {
+		return cwd
+	}
+	return "."
+}
+
+func defaultHomeWorkspace() string {
+	if v := strings.TrimSpace(os.Getenv("DUCHESS_HOME")); v != "" {
+		return inventory.ExpandHome(v)
+	}
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return "."
+		return ""
 	}
-	dir := cwd
-	for i := 0; i < 6; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "inventory", "hosts.ini")); err == nil {
-			return dir
+	return filepath.Join(home, ".duchess")
+}
+
+func isWorkspaceDir(dir string) bool {
+	for _, rel := range []string{
+		filepath.Join("inventory", "hosts.ini"),
+		filepath.Join("inventory", "hosts.yml"),
+		"duchess.yml",
+		"duchess.yaml",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err == nil {
+			return true
 		}
-		if _, err := os.Stat(filepath.Join(dir, "inventory", "hosts.yml")); err == nil {
-			return dir
-		}
-		if _, err := os.Stat(filepath.Join(dir, "duchess.yml")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
 	}
-	return cwd
+	return false
 }
 
 func loadWorkspaceConfig() config.WorkspaceConfig {

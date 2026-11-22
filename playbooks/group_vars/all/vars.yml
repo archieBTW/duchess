@@ -12,8 +12,8 @@ swap_file_size_mb: 2048
 apps_base_dir: "/opt"
 bybl_dir: "/opt/bybl"
 
-# Local root code directory relative to ansible/ directory
-local_code_root: "{{ playbook_dir }}/../.."
+# Local root code directory (override via DUCHESS_CODE_ROOT or -e local_code_root=...)
+local_code_root: "{{ lookup('env', 'DUCHESS_CODE_ROOT') | default(playbook_dir + '/../..', true) }}"
 
 # ==============================================================================
 # Nginx Hardening & Rate Limiting Settings

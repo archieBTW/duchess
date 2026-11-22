@@ -83,6 +83,10 @@ func (c WorkspaceConfig) EffectiveHistoryDir(workspaceDir string) string {
 	if strings.TrimSpace(c.HistoryDir) != "" {
 		return expandPath(c.HistoryDir, workspaceDir)
 	}
+	// Avoid double-nesting ~/.duchess/.duchess/history when workspace is ~/.duchess
+	if filepath.Base(filepath.Clean(workspaceDir)) == ".duchess" {
+		return filepath.Join(workspaceDir, "history")
+	}
 	return filepath.Join(workspaceDir, ".duchess", "history")
 }
 
@@ -249,6 +253,8 @@ func Load(workspaceDir string) WorkspaceConfig {
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates,
+			filepath.Join(home, ".duchess", "duchess.yml"),
+			filepath.Join(home, ".duchess", "duchess.yaml"),
 			filepath.Join(home, ".config", "duchess", "config.yml"),
 			filepath.Join(home, ".config", "duchess", "config.yaml"),
 		)

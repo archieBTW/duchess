@@ -96,4 +96,10 @@ func TestPerPlaybookAndPerServerVenvMatchingAndSave(t *testing.T) {
 	if got := loaded.MatchServerRemoteVenv([]*models.Host{dbHost}, "prod-db-01"); got != "/srv/db/.venv" {
 		t.Fatalf("expected server remote venv, got %q", got)
 	}
+
+	// Ensure ~/.duchess workspace stores history in ~/.duchess/history (not .duchess/.duchess/history)
+	dotDuchess := filepath.Join(dir, ".duchess")
+	if got := cfg.EffectiveHistoryDir(dotDuchess); got != filepath.Join(dotDuchess, "history") {
+		t.Fatalf("expected non-nested history dir %q, got %q", filepath.Join(dotDuchess, "history"), got)
+	}
 }

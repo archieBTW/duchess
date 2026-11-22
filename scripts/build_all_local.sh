@@ -17,7 +17,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_CODE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ROOT_CODE_DIR="${DUCHESS_CODE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 
 # ANSI Colors
 GREEN="\033[0;32m"
